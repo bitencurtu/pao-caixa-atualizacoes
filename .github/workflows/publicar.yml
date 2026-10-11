@@ -56,7 +56,7 @@ jobs:
           $version = $Matches[1]
           "arquivo=$($file.Name)" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "Publicaremos a versao $version a partir de $($file.Name)"
+          Write-Host "Compilando PaoCaixa $version a partir de $($file.Name)"
 
       - name: Extrair e validar codigo
         shell: pwsh
@@ -67,16 +67,16 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Expand-Archive -LiteralPath $env:ZIP_FONTE -DestinationPath source -Force
           $project = 'source/pao-caixa-nativo'
-          if (-not (Test-Path "$project/version.json")) { throw 'O ZIP deve conter a pasta pao-caixa-nativo e version.json.' }
+          if (-not (Test-Path "$project/version.json")) { throw 'O ZIP deve conter pao-caixa-nativo/version.json.' }
           $meta = Get-Content "$project/version.json" -Raw | ConvertFrom-Json
-          if ($meta.version -ne $env:VERSAO) { throw "Versao no ZIP ($($meta.version)) difere do nome ($env:VERSAO)." }
+          if ($meta.version -ne $env:VERSAO) { throw "Versao no ZIP $($meta.version) difere de $env:VERSAO." }
           $installer = Get-Content "$project/installer.nsi" -Raw
-          if ($installer -notmatch [regex]::Escape('!define VERSION "' + $env:VERSAO + '"')) { throw 'installer.nsi com numero de versao incorreto.' }
+          if (-not $installer.Contains('!define VERSION "' + $env:VERSAO + '"')) { throw 'installer.nsi com versao incorreta.' }
           $source = Get-Content "$project/src/Updates.cs" -Raw
-          if ($source -notmatch [regex]::Escape('public const string Version="' + $env:VERSAO + '"')) { throw 'Atualizador com numero de versao incorreto.' }
+          if (-not $source.Contains('public const string Version="' + $env:VERSAO + '"')) { throw 'Updates.cs com versao incorreta.' }
           Push-Location $project
           try {
-            node scripts/check-remote-config.mjs
+            & node scripts/check-remote-config.mjs
             if ($LASTEXITCODE -ne 0) { throw 'URL do Cloudflare Worker nao configurada.' }
           } finally { Pop-Location }
 
@@ -84,27 +84,94 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis --yes --no-progress
-          if ($LASTEXITCODE -ne 0) { throw 'Erro ao instalar NSIS.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao preparar NSIS.' }
 
-      - name: Compilar no Windows e gerar instalador
+      - name: Compilar e verificar EXE no Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location 'source/pao-caixa-nativo'
+          $project = (Get-Location).Path
+          New-Item -ItemType Directory -Path 'build','release' -Force | Out-Null
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          if (-not (Test-Path $csc)) { throw 'Compilador C# do .NET Framework nao encontrado.' }
+          $exe = Join-Path $project 'build/PaoCaixa.exe'
+          $sourceFiles = @(Get-ChildItem -LiteralPath (Join-Path $project 'src') -Filter '*.cs' -File | ForEach-Object { $_.FullName })
+          if ($sourceFiles.Count -lt 5) { throw 'Arquivos C# nao encontrados no projeto.' }
+          $compileArgs = @(
+            '/nologo', '/codepage:65001', '/target:winexe', '/platform:x86', '/optimize+',
+            "/out:$exe", '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
+            '/reference:System.Web.Extensions.dll', '/reference:System.Core.dll',
+            "/resource:$(Join-Path $project 'resources/seed.json'),seed.json",
+            "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json",
+            "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico",
+            "/win32manifest:$(Join-Path $project 'resources/app.manifest')",
+            "/win32icon:$(Join-Path $project 'resources/icon.ico')"
+          )
+          Write-Host "Compilando $($sourceFiles.Count) arquivos C# em: $exe"
+          & $csc @compileArgs @sourceFiles
+          if ($LASTEXITCODE -ne 0) { throw "Compilacao C# falhou (codigo $LASTEXITCODE)." }
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            Get-ChildItem -Force -Path (Join-Path $project 'build') | Format-Table Name,Length
+            throw "Compilador terminou, mas o executavel nao foi criado: $exe"
+          }
+          Write-Host "EXE compilado: $((Get-Item -LiteralPath $exe).Length) bytes"
+          Copy-Item -LiteralPath 'resources/PaoCaixa.exe.config' -Destination 'build/PaoCaixa.exe.config' -Force
+
+      - name: Gerar instalador NSIS
         shell: pwsh
         env:
           VERSAO: ${{ steps.source.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location 'source/pao-caixa-nativo'
-          # Use o mesmo comando de compilação do projeto, já testado em Windows.
-          # A entrada padrão vazia impede o PAUSE do .bat de bloquear a automação.
-          & cmd.exe /d /c 'call GERAR-INSTALADOR.bat < NUL'
-          if ($LASTEXITCODE -ne 0) { throw 'GERAR-INSTALADOR.bat falhou.' }
-          $exe = 'build/PaoCaixa.exe'
-          if (-not (Test-Path $exe)) { throw 'A compilação não gerou build/PaoCaixa.exe.' }
-          $installer = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
-          foreach ($f in @($installer, "$installer.blockmap", 'latest.yml', 'SHA256.txt')) {
-            if (-not (Test-Path "release/$f")) { throw "Arquivo obrigatório ausente: $f" }
+          $project = (Get-Location).Path
+          $nsis32 = Join-Path ${env:ProgramFiles(x86)} 'NSIS/makensis.exe'
+          $nsis64 = Join-Path $env:ProgramFiles 'NSIS/makensis.exe'
+          $nsis = @($nsis32,$nsis64) | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $nsis) { throw 'makensis.exe nao encontrado.' }
+          # Forcar caminhos absolutos: no GitHub Actions, o NSIS nao encontrou o EXE relativo.
+          $script = Get-Content 'installer.nsi' -Raw
+          $replacePaths = [ordered]@{
+            'build/PaoCaixa.exe' = 'build/PaoCaixa.exe'
+            'resources/PaoCaixa.exe.config' = 'resources/PaoCaixa.exe.config'
+            'resources/remote-control.json' = 'resources/remote-control.json'
+            'vendor/sqlite/sqlite3.dll' = 'vendor/sqlite/sqlite3.dll'
+            'GUIA-PaoCaixa-Windows.md' = 'GUIA-PaoCaixa-Windows.md'
+            'resources/icon.ico' = 'resources/icon.ico'
+          }
+          foreach ($entry in $replacePaths.GetEnumerator()) {
+            $full = (Join-Path $project $entry.Value).Replace('\','/')
+            $script = $script.Replace('"' + $entry.Key + '"', '"' + $full + '"')
+          }
+          $installerName = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
+          $out = (Join-Path $project "release/$installerName").Replace('\','/')
+          $script = $script.Replace('"release/PaoCaixa-Instalador-${VERSION}-x86.exe"','"' + $out + '"')
+          Set-Content -LiteralPath 'installer-ci.nsi' -Value $script -Encoding utf8BOM
+          & $nsis '/INPUTCHARSET' 'UTF8' 'installer-ci.nsi'
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao criar instalador NSIS.' }
+          if (-not (Test-Path "release/$installerName")) { throw 'Instalador nao foi criado.' }
+          Write-Host "Instalador criado: release/$installerName"
+
+      - name: Gerar feed e blockmap
+        shell: pwsh
+        env:
+          VERSAO: ${{ steps.source.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location 'source/pao-caixa-nativo'
+          & npm.cmd install --prefix build/release-tools --ignore-scripts --no-audit --no-fund app-builder-bin@4.2.0
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar app-builder-bin.' }
+          $builder = @(Get-ChildItem -Path 'build/release-tools/node_modules/app-builder-bin' -Filter 'app-builder.exe' -Recurse -File | Select-Object -First 1)
+          if ($builder.Count -eq 0) { throw 'Gerador de blockmap nao encontrado.' }
+          & node scripts/release-feed.mjs $builder[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar latest.yml e blockmap.' }
+          $name = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
+          foreach ($f in @($name, "$name.blockmap", 'latest.yml', 'SHA256.txt')) {
+            if (-not (Test-Path "release/$f")) { throw "Arquivo de release ausente: $f" }
           }
 
-      - name: Publicar a release no GitHub
+      - name: Publicar release no GitHub
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -113,8 +180,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-Location 'source/pao-caixa-nativo'
           $tag = "v$env:VERSAO"
-          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
-          if ($LASTEXITCODE -eq 0) { throw "A release $tag ja existe. Nao sera sobrescrita automaticamente." }
+          $exists = gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName 2>$null
+          if ($LASTEXITCODE -eq 0) { throw "A release $tag ja existe; nao sera sobrescrita." }
           $name = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
-          & gh release create $tag "release/$name" "release/$name.blockmap" 'release/latest.yml' 'release/SHA256.txt' --repo $env:GITHUB_REPOSITORY --target main --title "Pão & Caixa $env:VERSAO" --notes "Atualização automática do Pão & Caixa $env:VERSAO. Para instalar, baixe o arquivo .exe. Para atualizar, use o atualizador do aplicativo." --latest
-          if ($LASTEXITCODE -ne 0) { throw 'Publicacao da release falhou.' }
+          & gh release create $tag "release/$name" "release/$name.blockmap" 'release/latest.yml' 'release/SHA256.txt' --repo $env:GITHUB_REPOSITORY --target main --title "Pao & Caixa $env:VERSAO" --notes "Instalador e atualizacao do Pao & Caixa $env:VERSAO." --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao publicar release.' }
