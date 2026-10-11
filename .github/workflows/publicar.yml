@@ -1,0 +1,120 @@
+name: Compilar e publicar PaoCaixa
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'PaoCaixa-*-Source.zip'
+  workflow_dispatch:
+    inputs:
+      arquivo:
+        description: 'Nome do ZIP de codigo-fonte (opcional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: paocaixa-release
+  cancel-in-progress: false
+
+jobs:
+  publicar:
+    runs-on: windows-2022
+    steps:
+      - name: Baixar arquivos do repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Selecionar codigo-fonte
+        id: source
+        shell: pwsh
+        env:
+          NOME_SOLICITADO: ${{ inputs.arquivo }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pattern = '^PaoCaixa-(\d+\.\d+\.\d+)-Source\.zip$'
+          $files = @(Get-ChildItem -File -Filter 'PaoCaixa-*-Source.zip' | Where-Object { $_.Name -match $pattern })
+          if ($files.Count -eq 0) { throw 'Envie um arquivo PaoCaixa-2.0.3-Source.zip para a raiz do repositorio.' }
+          if ($env:NOME_SOLICITADO) {
+            $file = $files | Where-Object Name -eq $env:NOME_SOLICITADO | Select-Object -First 1
+            if (-not $file) { throw 'ZIP solicitado nao existe no repositorio.' }
+          } else {
+            $changed = @(git diff-tree --no-commit-id --name-only -r HEAD)
+            $candidates = @($files | Where-Object { $changed -contains $_.Name })
+            if ($candidates.Count -eq 0) { $candidates = $files }
+            $file = $candidates | Sort-Object { [version]([regex]::Match($_.Name, $pattern).Groups[1].Value) } -Descending | Select-Object -First 1
+          }
+          if ($file.Name -notmatch $pattern) { throw 'Nome do ZIP invalido.' }
+          $version = $Matches[1]
+          "arquivo=$($file.Name)" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Publicaremos a versao $version a partir de $($file.Name)"
+
+      - name: Extrair e validar codigo
+        shell: pwsh
+        env:
+          ZIP_FONTE: ${{ steps.source.outputs.arquivo }}
+          VERSAO: ${{ steps.source.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Expand-Archive -LiteralPath $env:ZIP_FONTE -DestinationPath source -Force
+          $project = 'source/pao-caixa-nativo'
+          if (-not (Test-Path "$project/version.json")) { throw 'O ZIP deve conter a pasta pao-caixa-nativo e version.json.' }
+          $meta = Get-Content "$project/version.json" -Raw | ConvertFrom-Json
+          if ($meta.version -ne $env:VERSAO) { throw "Versao no ZIP ($($meta.version)) difere do nome ($env:VERSAO)." }
+          $installer = Get-Content "$project/installer.nsi" -Raw
+          if ($installer -notmatch [regex]::Escape('!define VERSION "' + $env:VERSAO + '"')) { throw 'installer.nsi com numero de versao incorreto.' }
+          $source = Get-Content "$project/src/Updates.cs" -Raw
+          if ($source -notmatch [regex]::Escape('public const string Version="' + $env:VERSAO + '"')) { throw 'Atualizador com numero de versao incorreto.' }
+          Push-Location $project
+          try {
+            node scripts/check-remote-config.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'URL do Cloudflare Worker nao configurada.' }
+          } finally { Pop-Location }
+
+      - name: Instalar NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Erro ao instalar NSIS.' }
+
+      - name: Compilar no Windows e gerar instalador
+        shell: pwsh
+        env:
+          VERSAO: ${{ steps.source.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location 'source/pao-caixa-nativo'
+          # Use o mesmo comando de compilação do projeto, já testado em Windows.
+          # A entrada padrão vazia impede o PAUSE do .bat de bloquear a automação.
+          & cmd.exe /d /c 'call GERAR-INSTALADOR.bat < NUL'
+          if ($LASTEXITCODE -ne 0) { throw 'GERAR-INSTALADOR.bat falhou.' }
+          $exe = 'build/PaoCaixa.exe'
+          if (-not (Test-Path $exe)) { throw 'A compilação não gerou build/PaoCaixa.exe.' }
+          $installer = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
+          foreach ($f in @($installer, "$installer.blockmap", 'latest.yml', 'SHA256.txt')) {
+            if (-not (Test-Path "release/$f")) { throw "Arquivo obrigatório ausente: $f" }
+          }
+
+      - name: Publicar a release no GitHub
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSAO: ${{ steps.source.outputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Location 'source/pao-caixa-nativo'
+          $tag = "v$env:VERSAO"
+          gh release view $tag --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -eq 0) { throw "A release $tag ja existe. Nao sera sobrescrita automaticamente." }
+          $name = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
+          & gh release create $tag "release/$name" "release/$name.blockmap" 'release/latest.yml' 'release/SHA256.txt' --repo $env:GITHUB_REPOSITORY --target main --title "Pão & Caixa $env:VERSAO" --notes "Atualização automática do Pão & Caixa $env:VERSAO. Para instalar, baixe o arquivo .exe. Para atualizar, use o atualizador do aplicativo." --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Publicacao da release falhou.' }
