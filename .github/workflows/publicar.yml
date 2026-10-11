@@ -194,9 +194,13 @@ jobs:
           $common = @('/nologo','/langversion:5','/codepage:65001','/target:exe','/platform:x86',
             '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
             '/reference:System.Web.Extensions.dll','/reference:System.Core.dll',
-            '/resource:resources/seed.json,seed.json','/resource:resources/owner-bootstrap.json,owner-bootstrap.json')
+            "/resource:$(Join-Path $project 'resources\seed.json'),seed.json",
+            "/resource:$(Join-Path $project 'resources\owner-bootstrap.json'),owner-bootstrap.json")
           foreach ($test in @('CoreTests','UpdateTests','RemotePolicyTests','IntegrationTests')) {
-            & $csc @common "/out:build/$test.exe" "/main:$test" @sources "tests/$test.cs" 'tests/legacy/Updates-2.0.3.cs'
+            $testExe = Join-Path $project "build\$test.exe"
+            $testSource = Join-Path $project "tests\$test.cs"
+            $legacySource = Join-Path $project 'tests\legacy\Updates-2.0.3.cs'
+            & $csc @common "/out:$testExe" "/main:$test" @sources $testSource $legacySource
             if ($LASTEXITCODE -ne 0) { throw "Compilacao de $test falhou." }
           }
           & ./build/CoreTests.exe build/core-fixture
