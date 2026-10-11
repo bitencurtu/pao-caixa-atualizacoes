@@ -130,23 +130,34 @@ jobs:
           $nsis64 = Join-Path $env:ProgramFiles 'NSIS/makensis.exe'
           $nsis = @($nsis32,$nsis64) | Where-Object { Test-Path $_ } | Select-Object -First 1
           if (-not $nsis) { throw 'makensis.exe nao encontrado.' }
-          # Forcar caminhos absolutos: no GitHub Actions, o NSIS nao encontrou o EXE relativo.
+          # NSIS no Windows exige caminhos Windows com barras invertidas.
+          # As versoes anteriores convertiam para / e NSIS nao encontrava o EXE.
           $script = Get-Content 'installer.nsi' -Raw
-          $replacePaths = [ordered]@{
-            'build/PaoCaixa.exe' = 'build/PaoCaixa.exe'
-            'resources/PaoCaixa.exe.config' = 'resources/PaoCaixa.exe.config'
-            'resources/remote-control.json' = 'resources/remote-control.json'
-            'vendor/sqlite/sqlite3.dll' = 'vendor/sqlite/sqlite3.dll'
-            'GUIA-PaoCaixa-Windows.md' = 'GUIA-PaoCaixa-Windows.md'
-            'resources/icon.ico' = 'resources/icon.ico'
-          }
-          foreach ($entry in $replacePaths.GetEnumerator()) {
-            $full = (Join-Path $project $entry.Value).Replace('\','/')
-            $script = $script.Replace('"' + $entry.Key + '"', '"' + $full + '"')
+          $arquivos = @(
+            'build\PaoCaixa.exe',
+            'resources\PaoCaixa.exe.config',
+            'resources\remote-control.json',
+            'vendor\sqlite\sqlite3.dll',
+            'GUIA-PaoCaixa-Windows.md',
+            'resources\icon.ico'
+          )
+          foreach ($relativo in $arquivos) {
+            $origem = Join-Path $project $relativo
+            if (-not (Test-Path -LiteralPath $origem -PathType Leaf)) {
+              throw "Arquivo obrigatorio ausente antes do NSIS: $origem"
+            }
+            $caminhoNSIS = [System.IO.Path]::GetFullPath($origem)
+            # O projeto original usa / nas strings File e !define MUI_ICON.
+            $referencia = $relativo.Replace('\','/')
+            $script = $script.Replace('"' + $referencia + '"', '"' + $caminhoNSIS + '"')
+            Write-Host "NSIS: $referencia -> $caminhoNSIS"
           }
           $installerName = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
-          $out = (Join-Path $project "release/$installerName").Replace('\','/')
+          $out = Join-Path $project "release\$installerName"
           $script = $script.Replace('"release/PaoCaixa-Instalador-${VERSION}-x86.exe"','"' + $out + '"')
+          if ($script -match 'File "build/PaoCaixa.exe"') {
+            throw 'Caminho antigo do PaoCaixa.exe ainda presente no NSIS.'
+          }
           Set-Content -LiteralPath 'installer-ci.nsi' -Value $script -Encoding utf8BOM
           & $nsis '/INPUTCHARSET' 'UTF8' 'installer-ci.nsi'
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao criar instalador NSIS.' }
