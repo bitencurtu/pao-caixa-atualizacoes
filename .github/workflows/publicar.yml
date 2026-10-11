@@ -203,39 +203,6 @@ jobs:
             & $csc @common "/out:$testExe" "/main:$test" @sources $testSource $legacySource
             if ($LASTEXITCODE -ne 0) { throw "Compilacao de $test falhou." }
           }
-          # Compare only synthetic commercial fixture data; never accounts or customer databases.
-          $probe = @'
-          using System; using System.IO; using System.Collections; using System.Collections.Generic; using System.Web.Script.Serialization; using PaoCaixa;
-          class MigrationProbe {
-            static string Diff(object a,object b,string path) {
-              if(a==null||b==null)return a==b?null:path+" (null/type)";
-              var da=a as Dictionary<string,object>;var db=b as Dictionary<string,object>;
-              if(da!=null&&db!=null){
-                foreach(var key in da.Keys){if(!db.ContainsKey(key))return path+" (missing field)";var difference=Diff(da[key],db[key],path+"."+key);if(difference!=null)return difference;}
-                return da.Count==db.Count?null:path+" (field count)";
-              }
-              var la=a as IList;var lb=b as IList;
-              if(la!=null&&lb!=null){if(la.Count!=lb.Count)return path+" (list count)";for(int i=0;i<la.Count;i++){var difference=Diff(la[i],lb[i],path+"["+i+"]");if(difference!=null)return difference;}return null;}
-              return object.Equals(a,b)?null:path+" ("+a.GetType().Name+"/"+b.GetType().Name+")";
-            }
-            static void Main(string[] args) {
-              var before=J.Read<State>(File.ReadAllText(Path.Combine(args[0],"before.json")));
-              using(var db=new Store(args[0])) {
-                db.Login(Store.OwnerEmail,"Teste-Pdv-2026");
-                var serializer=new JavaScriptSerializer{MaxJsonLength=int.MaxValue};
-                string difference=Diff(serializer.DeserializeObject(J.Write(before)),serializer.DeserializeObject(J.Write(db.Export())),"state");
-                Console.WriteLine("Synthetic migration comparison: "+(difference??"all fields equivalent"));
-              }
-            }
-          }
-          '@
-          $probeSource=Join-Path $project 'build\MigrationProbe.cs'
-          [IO.File]::WriteAllText($probeSource,$probe,[Text.UTF8Encoding]::new($false))
-          $probeExe=Join-Path $project 'build\MigrationProbe.exe'
-          & $csc @common "/out:$probeExe" '/main:MigrationProbe' @sources $probeSource
-          if ($LASTEXITCODE -ne 0) { throw 'Migration diagnostic compilation failed.' }
-          & $probeExe build/core-fixture
-          if ($LASTEXITCODE -ne 0) { throw 'Migration diagnostic failed.' }
           & ./build/CoreTests.exe build/core-fixture
           if ($LASTEXITCODE -ne 0) { throw 'Regressao no núcleo de vendas/caixa/contas.' }
           & ./build/UpdateTests.exe build/update-fixture tests/fixtures/latest-2.0.3-crlf.yml
