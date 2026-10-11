@@ -203,8 +203,9 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Set-Location 'source/pao-caixa-nativo'
           $tag = "v$env:VERSAO"
-          $exists = gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName 2>$null
-          if ($LASTEXITCODE -eq 0) { throw "A release $tag ja existe; nao sera sobrescrita." }
+          $existentes = @(gh release list --repo $env:GITHUB_REPOSITORY --limit 100 --json tagName | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao consultar releases existentes.' }
+          if (@($existentes | Where-Object { $_.tagName -eq $tag }).Count -gt 0) { throw "A release $tag ja existe; nao sera sobrescrita." }
           $name = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
           & gh release create $tag "release/$name" 'release/latest.yml' 'release/SHA256.txt' --repo $env:GITHUB_REPOSITORY --target main --title "Pao & Caixa $env:VERSAO" --notes "Instalador e atualizacao do Pao & Caixa $env:VERSAO." --latest
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao publicar release.' }
