@@ -164,23 +164,35 @@ jobs:
           if (-not (Test-Path "release/$installerName")) { throw 'Instalador nao foi criado.' }
           Write-Host "Instalador criado: release/$installerName"
 
-      - name: Gerar feed e blockmap
+      - name: Gerar manifesto de atualização (sem blockmap)
         shell: pwsh
         env:
           VERSAO: ${{ steps.source.outputs.version }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-Location 'source/pao-caixa-nativo'
-          & npm.cmd install --prefix build/release-tools --ignore-scripts --no-audit --no-fund app-builder-bin@4.2.0
-          if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar app-builder-bin.' }
-          $builder = @(Get-ChildItem -Path 'build/release-tools/node_modules/app-builder-bin' -Filter 'app-builder.exe' -Recurse -File | Select-Object -First 1)
-          if ($builder.Count -eq 0) { throw 'Gerador de blockmap nao encontrado.' }
-          & node scripts/release-feed.mjs $builder[0].FullName
-          if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar latest.yml e blockmap.' }
-          $name = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
-          foreach ($f in @($name, "$name.blockmap", 'latest.yml', 'SHA256.txt')) {
-            if (-not (Test-Path "release/$f")) { throw "Arquivo de release ausente: $f" }
-          }
+          $nome = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
+          $arquivo = Join-Path (Get-Location).Path "release/$nome"
+          if (-not (Test-Path -LiteralPath $arquivo -PathType Leaf)) { throw "Instalador não encontrado: $arquivo" }
+          $bytes = [System.IO.File]::ReadAllBytes($arquivo)
+          $sha512 = [Convert]::ToBase64String([System.Security.Cryptography.SHA512]::HashData($bytes))
+          $sha256 = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
+          $size = $bytes.LongLength
+          $data = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ', [Globalization.CultureInfo]::InvariantCulture)
+          $manifesto = @"
+          version: $env:VERSAO
+          files:
+            - url: $nome
+              sha512: $sha512
+              size: $size
+          path: $nome
+          sha512: $sha512
+          releaseDate: '$data'
+          "@
+          $semBOM = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location).Path 'release/latest.yml'), $manifesto + "`n", $semBOM)
+          [System.IO.File]::WriteAllText((Join-Path (Get-Location).Path 'release/SHA256.txt'), "$sha256  $nome`n", $semBOM)
+          Write-Host "Manifesto gerado. Versão: $env:VERSAO; tamanho: $size bytes."
 
       - name: Publicar release no GitHub
         shell: pwsh
@@ -194,5 +206,5 @@ jobs:
           $exists = gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName 2>$null
           if ($LASTEXITCODE -eq 0) { throw "A release $tag ja existe; nao sera sobrescrita." }
           $name = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
-          & gh release create $tag "release/$name" "release/$name.blockmap" 'release/latest.yml' 'release/SHA256.txt' --repo $env:GITHUB_REPOSITORY --target main --title "Pao & Caixa $env:VERSAO" --notes "Instalador e atualizacao do Pao & Caixa $env:VERSAO." --latest
+          & gh release create $tag "release/$name" 'release/latest.yml' 'release/SHA256.txt' --repo $env:GITHUB_REPOSITORY --target main --title "Pao & Caixa $env:VERSAO" --notes "Instalador e atualizacao do Pao & Caixa $env:VERSAO." --latest
           if ($LASTEXITCODE -ne 0) { throw 'Falha ao publicar release.' }
