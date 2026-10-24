@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -16,9 +18,20 @@ namespace PaoCaixa {
   public static Color Green {get{return Dark?Color.FromArgb(158,195,139):Accent;}}
   public static Color Background(Control c){while(c!=null){if(c.BackColor.A==255)return c.BackColor;c=c.Parent;}return Bg;}
   public static Font Font(float size=10,FontStyle style=FontStyle.Regular){return new Font("Segoe UI",size,style);}
+  // Fontes de desenho sao compartilhadas: antes cada texto pintado criava um Font.
+  // Nunca descarte fontes retornadas por PaintFont individualmente.
+  static readonly Dictionary<string,Font> paintFonts=new Dictionary<string,Font>();
+  internal static Font PaintFont(float size,FontStyle style){
+   string key=size.ToString("R",CultureInfo.InvariantCulture)+":"+((int)style).ToString(CultureInfo.InvariantCulture);
+   lock(paintFonts){
+    Font f;
+    if(!paintFonts.TryGetValue(key,out f)){f=new Font("Segoe UI",size,style);paintFonts.Add(key,f);}
+    return f;
+   }
+  }
   public static GraphicsPath Round(RectangleF r,float radius){var p=new GraphicsPath();float d=Math.Min(radius*2,Math.Min(r.Width,r.Height));if(d<=0){p.AddRectangle(r);return p;}p.AddArc(r.X,r.Y,d,d,180,90);p.AddArc(r.Right-d,r.Y,d,d,270,90);p.AddArc(r.Right-d,r.Bottom-d,d,d,0,90);p.AddArc(r.X,r.Bottom-d,d,d,90,90);p.CloseFigure();return p;}
   public static void Box(Graphics g,RectangleF r,Color fill,Color border,float radius=10){using(var p=Round(r,radius)){using(var b=new SolidBrush(fill))g.FillPath(b,p);if(border!=Color.Empty)using(var pen=new Pen(border))g.DrawPath(pen,p);}}
-  public static void Text(Graphics g,string text,Rectangle r,float size,Color color,FontStyle style=FontStyle.Regular,TextFormatFlags flags=TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis){using(var font=Font(size,style))TextRenderer.DrawText(g,text??"",font,r,color,flags|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding);}
+  public static void Text(Graphics g,string text,Rectangle r,float size,Color color,FontStyle style=FontStyle.Regular,TextFormatFlags flags=TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis){TextRenderer.DrawText(g,text??"",PaintFont(size,style),r,color,flags|TextFormatFlags.NoPrefix|TextFormatFlags.NoPadding);}
   public static Button Button(string label,Action action){var b=new SoftButton{Text=label,AutoSize=true,MinimumSize=new Size(96,40),Margin=new Padding(4),Cursor=Cursors.Hand};b.Click+=(s,e)=>{try{action();}catch(Exception ex){MessageBox.Show(b.FindForm(),ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIcon.Information);}};return b;}
   public static Button Primary(string label,Action action,string icon=null){var b=(SoftButton)Button(label,action);b.Tone="primary";b.IconName=icon;return b;}
   public static Button IconButton(string label,Action action,string icon,bool right=false){var b=(SoftButton)Button(label,action);b.IconName=icon;b.IconRight=right;return b;}
