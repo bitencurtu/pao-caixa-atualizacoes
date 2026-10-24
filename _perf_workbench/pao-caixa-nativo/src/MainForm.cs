@@ -180,6 +180,13 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   void SaveDraft(Action next){var d=Snapshot();Fire(()=>{db.SetDraft(d);return null;},x=>{if(next!=null)next();});}
   void FlushDraftThen(Action next){draftTimer.Stop();if(user!=null&&user.role!="financial")SaveDraft(next);else next();}
   // Prepara e configura a nova pagina fora da arvore visual. A anterior nao e desmontada.
+  // Libera referencias a controles da venda quando a tela deixa de existir.
+  // Os dados do pedido continuam no Draft e no banco SQLite.
+  void ReleaseOrderViewReferences(){
+   catalogue=null;cartView=null;categories=null;search=null;discount=null;note=null;
+   total=null;subtotal=null;catalogCaption=null;cartHeading=null;receive=null;
+   cartGrid=null;
+  }
   void SwapPage(Panel previous,Panel next){
    shell.SuspendLayout();
    try{
@@ -223,6 +230,9 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     }
     Ui.Apply(next);
     SwapPage(previous,next);
+    // Controles descartados nao podem continuar vivos via campos do MainForm.
+    if(wanted!="Pedidos")ReleaseOrderViewReferences();
+    if(wanted!="Configurações")updateLabel=null;
    }catch(Exception ex){
     if(!next.IsDisposed)next.Dispose();
     if(!previous.IsDisposed&&previous.Parent==shell)body=previous;
