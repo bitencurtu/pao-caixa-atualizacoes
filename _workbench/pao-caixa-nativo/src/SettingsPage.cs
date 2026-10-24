@@ -24,7 +24,7 @@ namespace PaoCaixa {
    var update=new CardPanel{Padding=new Padding(0)};update.Controls.Add(new SectionHeading("Atualizações do programa","Ao iniciar, o programa procura e instala novas versões com internet."));
    updateLabel=Ui.Label(updates.Status);updateLabel.AutoSize=false;var channel=Ui.Caption("Canal: "+prefs.url);channel.AutoSize=false;
    var actions=Ui.Flow();actions.Dock=DockStyle.None;actions.AutoSize=false;
-   actions.Controls.Add(Ui.Button("Procurar atualização",()=>CheckUpdate()));actions.Controls.Add(Ui.Button("Baixar atualização",()=>DownloadUpdate()));actions.Controls.Add(Ui.Primary("Instalar e reiniciar",()=>InstallUpdate(),"download"));
+   actions.Controls.Add(Ui.Primary("Verificar e atualizar",()=>RunFullUpdate(),"download"));
    if(user.Owner)actions.Controls.Add(Ui.Button("Alterar canal",()=>ChangeUpdateChannel(channel)));
    var updateNotice=Ui.Caption("Feche o caixa e conclua os pedidos antes de instalar. O programa criará um backup dos dados.");updateNotice.AutoSize=false;
    var storage=Ui.Caption("Banco local: "+db.FilePath);storage.AutoSize=false;
