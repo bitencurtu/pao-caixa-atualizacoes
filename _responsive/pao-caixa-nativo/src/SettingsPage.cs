@@ -30,7 +30,17 @@ namespace PaoCaixa {
    var storage=Ui.Caption("Banco local: "+db.FilePath);storage.AutoSize=false;
    update.Controls.AddRange(new Control[]{updateLabel,channel,actions,updateNotice,storage});
    Action updateLayout=()=>{int w=update.ClientSize.Width-44;updateLabel.SetBounds(22,105,w,73);channel.SetBounds(22,188,w,44);actions.SetBounds(18,244,w+6,w<800?100:48);updateNotice.SetBounds(22,w<800?360:303,w,49);storage.SetBounds(22,w<800?414:357,w,44);};update.SizeChanged+=(sender,e)=>updateLayout();
-   p.Controls.AddRange(new Control[]{data,backups,update});Action arrange=()=>{int w=Math.Max(380,p.Width-20);bool two=w>=790;int cw=two?(w-24)/2:w;data.SetBounds(0,0,cw,466);backups.SetBounds(two?cw+24:0,two?0:490,cw,466);int y=two?490:980;update.SetBounds(0,y,w,w<800?485:420);dataLayout();backupLayout();updateLayout();p.AutoScrollMinSize=new Size(0,y+update.Height+14);};p.SizeChanged+=(sender,e)=>arrange();arrange();
+   p.Controls.AddRange(new Control[]{data,backups,update});Action arrange=()=>{
+    int w=ResponsiveLayout.ContentWidth(p.ClientSize.Width),x=ResponsiveLayout.ContentLeft(p.ClientSize.Width);
+    bool two=w>=790;
+    int cw=two?(w-24)/2:w;
+    data.SetBounds(x,0,cw,466);
+    backups.SetBounds(x+(two?cw+24:0),two?0:490,cw,466);
+    int y=two?490:980;
+    update.SetBounds(x,y,w,w<800?485:420);
+    dataLayout();backupLayout();updateLayout();
+    p.AutoScrollMinSize=new Size(0,y+update.Height+14);
+   };p.SizeChanged+=(sender,e)=>arrange();arrange();
   }
   void ChangeUpdateChannel(Label channelLabel){
    lock(db.Sync)db.Owner();if(updateChecking||updateDownloading)throw new Exception("Aguarde a consulta ou o download terminar antes de alterar o canal.");
