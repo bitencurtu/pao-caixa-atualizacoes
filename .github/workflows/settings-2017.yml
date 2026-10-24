@@ -1,0 +1,74 @@
+name: Testar e preparar remoção de operador 2.0.17
+on:
+  push:
+    branches: [fix/remove-default-operator-2017]
+    paths: ['.github/workflows/settings-2017.yml','tools/SettingsOperatorRemovalTests-2017.cs','_settings2017/pao-caixa-nativo/src/SettingsPage.cs']
+permissions:
+  contents: write
+jobs:
+  settings:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar código e dados de teste da versão atual
+        shell: pwsh
+        run: |
+          Expand-Archive PaoCaixa-2.0.16-Source.zip -DestinationPath source -Force
+          Copy-Item '_settings2017/pao-caixa-nativo/src/SettingsPage.cs' 'source/pao-caixa-nativo/src/SettingsPage.cs' -Force
+          Set-Location source/pao-caixa-nativo
+          New-Item -ItemType Directory build -Force | Out-Null
+          Copy-Item vendor/sqlite/sqlite3.dll build/sqlite3.dll -Force
+          node tests/create-legacy-fixture.mjs build/operator-test-fixture
+          if($LASTEXITCODE -ne 0){throw 'Fixture failed'}
+      - name: Testar formulário e gravação em Windows
+        shell: pwsh
+        run: |
+          Set-Location source/pao-caixa-nativo
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $harness=(Resolve-Path '../../tools/SettingsOperatorRemovalTests-2017.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:SettingsOperatorRemovalTests' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/SettingsOperatorRemovalTests.exe' @sources $harness
+          if($LASTEXITCODE -ne 0){throw 'Compile failed'}
+          & ./build/SettingsOperatorRemovalTests.exe build/operator-test-fixture
+          if($LASTEXITCODE -ne 0){throw 'Settings UI tests failed'}
+      - name: Montar fonte 2.0.17 sem alteração dos dados
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,zipfile
+          old=pathlib.Path('PaoCaixa-2.0.16-Source.zip')
+          new=pathlib.Path('PaoCaixa-2.0.17-Source.zip')
+          target='pao-caixa-nativo/src/SettingsPage.cs'
+          replacement=pathlib.Path('_settings2017')/target
+          new_settings=replacement.read_bytes()
+          count=0
+          with zipfile.ZipFile(old) as original,zipfile.ZipFile(new,'w') as output:
+           for info in original.infolist():
+            content=original.read(info.filename)
+            if info.filename==target:
+             content=new_settings
+             count+=1
+            if info.filename.endswith(('.cs','.json','.nsi','.config','.md','.xml','.mjs','.txt')):
+             content=content.replace(b'2.0.16',b'2.0.17')
+            output.writestr(info,content)
+          assert count==1
+          with zipfile.ZipFile(new) as z:
+           s=z.read(target)
+           assert b'Operador padr' not in s
+           assert b'@operator=shop.@operator' in s
+           assert b'Nome da padaria' in s and b'Mensagem no comprovante' in s
+           assert b'public const string Version="2.0.17"' in z.read('pao-caixa-nativo/src/Updates.cs')
+           assert b'!define VERSION "2.0.17"' in z.read('pao-caixa-nativo/installer.nsi')
+          print('PACKAGE_READY',new,new.stat().st_size)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Packaging failed'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PaoCaixa-2.0.17-Source.zip
+          git rm -qr _settings2017 .github/workflows/extract-settings-2017.yml .github/workflows/settings-2017.yml tools/SettingsOperatorRemovalTests-2017.cs
+          git commit -m 'ui: remover operador padrão das configurações preservando compatibilidade'
+          git push
