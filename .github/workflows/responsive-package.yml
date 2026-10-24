@@ -2,7 +2,7 @@ name: Validar responsividade e montar 2.0.16
 on:
   push:
     branches: [fix/responsive-monitors-2016]
-    paths: ['.github/workflows/responsive-package.yml']
+    paths: ['.github/workflows/responsive-package.yml', '_responsive/pao-caixa-nativo/src/*.cs']
 permissions:
   contents: write
 jobs:
