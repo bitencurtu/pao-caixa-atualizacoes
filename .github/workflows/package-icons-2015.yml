@@ -1,0 +1,69 @@
+name: Validar ícones nativos 2.0.15
+on:
+  push:
+    branches: [ui/sidebar-icons-2015]
+    paths: ['.github/workflows/package-icons-2015.yml']
+permissions:
+  contents: write
+jobs:
+  test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair versão instalada e substituir somente ícones
+        shell: pwsh
+        run: |
+          Expand-Archive 'PaoCaixa-2.0.14-Source.zip' -DestinationPath source -Force
+          Copy-Item '_icon_source/pao-caixa-nativo/src/Icons.cs' 'source/pao-caixa-nativo/src/Icons.cs' -Force
+          Copy-Item '_icon_source/pao-caixa-nativo/src/VisualControls.cs' 'source/pao-caixa-nativo/src/VisualControls.cs' -Force
+          Set-Location 'source/pao-caixa-nativo'
+          New-Item -ItemType Directory 'build' -Force | Out-Null
+          Copy-Item 'vendor/sqlite/sqlite3.dll' 'build/sqlite3.dll' -Force
+      - name: Compilar C# 5 e testar legibilidade em 16, 19 e 24 pixels
+        shell: pwsh
+        run: |
+          Set-Location 'source/pao-caixa-nativo'
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $test=(Resolve-Path '../../tools/SidebarIconsSmoke-2015.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:SidebarIconsSmoke' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/SidebarIconsSmoke.exe' @sources $test
+          if($LASTEXITCODE -ne 0){throw 'Falha de compilação dos ícones'}
+          & ./build/SidebarIconsSmoke.exe
+          if($LASTEXITCODE -ne 0){throw 'Teste de ícones falhou'}
+      - name: Criar pacote 2.0.15 sem alteração de lógica
+        shell: pwsh
+        run: |
+          @'
+          import zipfile,pathlib,hashlib
+          original=pathlib.Path('PaoCaixa-2.0.14-Source.zip')
+          target=pathlib.Path('PaoCaixa-2.0.15-Source.zip')
+          edits={}
+          for name in ('Icons.cs','VisualControls.cs'):
+           edits['pao-caixa-nativo/src/'+name]=(pathlib.Path('_icon_source/pao-caixa-nativo/src')/name).read_bytes()
+          touched=set()
+          with zipfile.ZipFile(original) as old,zipfile.ZipFile(target,'w') as new:
+           for info in old.infolist():
+            data=old.read(info.filename)
+            if info.filename in edits:
+             data=edits[info.filename];touched.add(info.filename)
+            if info.filename.endswith(('.cs','.json','.nsi','.config','.md','.xml','.mjs','.txt')):
+             data=data.replace(b'2.0.14',b'2.0.15')
+            new.writestr(info,data)
+          assert touched==set(edits),(touched,set(edits))
+          with zipfile.ZipFile(target) as z:
+           icons=z.read('pao-caixa-nativo/src/Icons.cs')
+           menu=z.read('pao-caixa-nativo/src/VisualControls.cs')
+           assert b'public static class SidebarIcons' in icons
+           assert menu.count(b'SidebarIcons.Draw(')==1
+           assert b'public const string Version="2.0.15"' in z.read('pao-caixa-nativo/src/Updates.cs')
+           assert b'!define VERSION "2.0.15"' in z.read('pao-caixa-nativo/installer.nsi')
+          print('SOURCE_READY',target,target.stat().st_size)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Pacote falhou'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PaoCaixa-2.0.15-Source.zip
+          git rm -r '_icon_source' '.github/workflows/icon-sources.yml' '.github/workflows/package-icons-2015.yml' 'tools/SidebarIconsSmoke-2015.cs'
+          git commit -m 'style: ícones vetoriais modernos no menu lateral 2.0.15'
+          git push
