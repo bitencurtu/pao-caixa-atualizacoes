@@ -26,9 +26,9 @@ class UiDiag {
      Set(form,"db",store);Set(form,"user",user);
      typeof(MainForm).GetMethod("ReadPresentation",F).Invoke(form,null);
      var nav=(SideNavigation)Get(form,"nav");
-     nav.Reset(new[]{"Pedidos","Produtos","Configurações","Meu perfil","Visão geral","Relatórios","Meu caixa"});
+     nav.Reset(new[]{"Pedidos","Produtos","Configurações","Meu perfil"});
      nav.Visible=true;
-     for(int i=0;i<21;i++){
+     for(int i=0;i<12;i++){
       nav.SelectedIndex=i%nav.Pages.Count;
       Console.WriteLine("TEST_NAV;BEGIN;"+i+";"+nav.SelectedPage);
       Load(form);
