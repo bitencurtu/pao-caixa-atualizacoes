@@ -190,13 +190,13 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
 
   void Logout(){if(user==null)return;FlushDraftThen(()=>{lock(db.Sync)db.Logout();user=null;products.Clear();draft=new Draft();LoginPage();});}
   Draft Snapshot(){return J.Read<Draft>(J.Write(draft));}
-  void SaveDraft(Action next){
+  async void SaveDraft(Action next){
     if(user==null||user.role=="financial"){if(next!=null)next();return;}
     var d=Snapshot();
     string json=J.Write(d);
     // Nao grava e nao desativa a interface em toda navegacao sem mudancas.
     if(json==lastSavedDraftJson){if(next!=null)next();return;}
-    Run(()=>{db.SetDraft(d);return null;},x=>{
+    await Run(()=>{db.SetDraft(d);return null;},x=>{
      lastSavedDraftJson=json;
      if(next!=null)next();
     },true);
