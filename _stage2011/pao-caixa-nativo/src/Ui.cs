@@ -53,11 +53,12 @@ namespace PaoCaixa {
    Color fore=tag=="muted"?Muted:Ink;
    Color back=c is TextBox||c is ComboBox||c is DataGridView||c is CardPanel?Card:tag=="sidebar"?Side:tag=="card"?Card:Bg;
    if(c is Label||c is FlowLayoutPanel)back=Color.Transparent;
-   if(c.ForeColor!=fore)c.ForeColor=fore;
-   if(c.BackColor!=back)c.BackColor=back;
-   // Estilos de tabela sao caros e so precisam ser atualizados na primeira
-   // aplicacao ou na troca real do tema.
+   // Controles personalizados podem definir seu proprio BackColor em ThemeChanged().
+   // Sem troca de tema, nem tocar nessas propriedades (isso gerava invalidacao extra).
    if(themeChanged){
+    if(c.ForeColor!=fore)c.ForeColor=fore;
+    if(c.BackColor!=back)c.BackColor=back;
+    // Tabelas precisam receber os estilos apenas ao entrar ou mudar de tema.
     var g=c as DataGridView;
     if(g!=null){
      g.EnableHeadersVisualStyles=false;
