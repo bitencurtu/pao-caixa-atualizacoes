@@ -1,0 +1,29 @@
+name: Prepare responsive audit sources
+on:
+  push:
+    branches: [fix/responsive-monitors-2016]
+    paths: ['.github/workflows/responsive-extract.yml']
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract WinForms layout sources
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile
+          with zipfile.ZipFile("PaoCaixa-2.0.15-Source.zip") as z:
+           for entry in z.namelist():
+            if entry.endswith(".cs") and ("/src/" in entry or "/tests/" in entry):
+             target=pathlib.Path("_responsive")/entry
+             target.parent.mkdir(parents=True,exist_ok=True)
+             target.write_bytes(z.read(entry))
+             print(entry,len(z.read(entry)))
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add _responsive
+          git commit -m "test: expose sources for monitor layout audit"
+          git push
