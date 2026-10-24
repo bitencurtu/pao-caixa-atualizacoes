@@ -20,7 +20,7 @@ namespace PaoCaixa {
   readonly SmoothWheelRouter wheelRouter;
 
   bool busy,initializing=true,closingForUpdate,updateFlowRunning,preparingPage;int pageLoadSerial;OwnerView ownerViewReady;ReportView reportViewReady;CashView cashViewReady;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
-  List<Product> products=new List<Product>();Draft draft=new Draft();ProductCatalog catalogue;DataGridView cartGrid;CartList cartView;CategoryTabs categories;TextBox search,discount,note;Label total,subtotal,catalogCaption;SectionHeading cartHeading;Button receive;bool filling;Register currentRegister;bool cashOccupied;long nextNumber;
+  List<Product> products=new List<Product>();Draft draft=new Draft();string lastSavedDraftJson;ProductCatalog catalogue;DataGridView cartGrid;CartList cartView;CategoryTabs categories;TextBox search,discount,note;Label total,subtotal,catalogCaption;SectionHeading cartHeading;Button receive;bool filling;Register currentRegister;bool cashOccupied;long nextNumber;
   readonly Timer draftTimer=new Timer{Interval=450};readonly Timer updateTimer=new Timer{Interval=30000};
   // Consulta automatica em segundo plano a cada 15 segundos. Nunca bloqueia a UI
   // esperando a rede, nem abre janelas a cada consulta.
@@ -44,7 +44,7 @@ namespace PaoCaixa {
    nav.SelectedIndexChanged+=(sender,e)=>{if(!initializing&&user!=null&&!busy)FlushDraftThen(()=>LoadPage());};
    draftTimer.Tick+=(sender,e)=>{draftTimer.Stop();if(!busy&&user!=null&&user.role!="financial")SaveDraft(null);else draftTimer.Start();};
    Shown+=async(sender,e)=>{await Run(()=>{remote.Check();db=new Store(dataDir,remote);try{db.DailyBackup();}catch{statusText="Backup diário não concluído. Confira o espaço livre em Configurações.";}return null;});if(!IsDisposed&&db!=null){started=true;await UpdateBeforeLogin();}};
-   FormClosing+=(sender,e)=>{if(closingForUpdate)return;if(startupRunning){e.Cancel=true;startupCloseRequested=true;startupCancellation.Cancel();return;}if(busy){e.Cancel=true;return;}if(user!=null&&user.role!="financial"){try{lock(db.Sync)db.SetDraft(Snapshot());}catch(Exception ex){e.Cancel=true;MessageBox.Show(ex.Message,"Não foi possível guardar o pedido");}}};
+   FormClosing+=(sender,e)=>{if(closingForUpdate)return;if(startupRunning){e.Cancel=true;startupCloseRequested=true;startupCancellation.Cancel();return;}if(busy){e.Cancel=true;return;}if(user!=null&&user.role!="financial"){try{var finalDraft=Snapshot();string finalJson=J.Write(finalDraft);if(finalJson!=lastSavedDraftJson){lock(db.Sync)db.SetDraft(finalDraft);lastSavedDraftJson=finalJson;}}catch(Exception ex){e.Cancel=true;MessageBox.Show(ex.Message,"Não foi possível guardar o pedido");}}};
    updateTimer.Tick+=(sender,e)=>{if(user!=null&&user.role=="admin"&&!busy&&!updateChecking&&!updateDownloading&&!updateFlowRunning){CheckUpdate();updateTimer.Interval=4*60*60*1000;}};updateTimer.Start();
    remoteTimer.Tick+=(sender,e)=>{
     if(!started||IsDisposed)return;
@@ -173,11 +173,21 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    nav.Reset(user.Owner?pages.Concat(new[]{"Painel Biel"}):pages);nav.Visible=true;AcceptButton=null;initializing=false;
    BeginInvoke(new Action(()=>Fire(()=>{ReadPresentation();return null;},x=>LoadPage())));
   }
-  void ReadPresentation(){shop=db.Shop();products=db.Products();draft=db.GetDraft();currentRegister=db.Open();cashOccupied=db.Occupied();nextNumber=db.NextNumber();}
+  void ReadPresentation(){shop=db.Shop();products=db.Products();draft=db.GetDraft();lastSavedDraftJson=J.Write(draft);currentRegister=db.Open();cashOccupied=db.Occupied();nextNumber=db.NextNumber();}
 
   void Logout(){if(user==null)return;FlushDraftThen(()=>{lock(db.Sync)db.Logout();user=null;products.Clear();draft=new Draft();LoginPage();});}
   Draft Snapshot(){return J.Read<Draft>(J.Write(draft));}
-  void SaveDraft(Action next){var d=Snapshot();Fire(()=>{db.SetDraft(d);return null;},x=>{if(next!=null)next();});}
+  void SaveDraft(Action next){
+    if(user==null||user.role=="financial"){if(next!=null)next();return;}
+    var d=Snapshot();
+    string json=J.Write(d);
+    // Nao grava e nao desativa a interface em toda navegacao sem mudancas.
+    if(json==lastSavedDraftJson){if(next!=null)next();return;}
+    Fire(()=>{db.SetDraft(d);return null;},x=>{
+     lastSavedDraftJson=json;
+     if(next!=null)next();
+    });
+   }
   void FlushDraftThen(Action next){draftTimer.Stop();if(user!=null&&user.role!="financial")SaveDraft(next);else next();}
   // Prepara e configura a nova pagina fora da arvore visual. A anterior nao e desmontada.
   // Libera referencias a controles da venda quando a tela deixa de existir.
