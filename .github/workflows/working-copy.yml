@@ -1,0 +1,32 @@
+name: Preparar arquivos para correcao visual
+on:
+  push:
+    branches: [fix/navigation-no-flicker-208]
+    paths:
+      - '.github/workflows/working-copy.yml'
+permissions:
+  contents: write
+jobs:
+  preparar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair fontes para edicao e diagnostico
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import zipfile,pathlib
+          selected={'MainForm.cs','SettingsPage.cs','Ui.cs','VisualControls.cs','Sections.cs','StartupUpdate.cs','Updates.cs','Program.cs','VisualBehaviorTests.cs','UpdateTests.cs'}
+          with zipfile.ZipFile('PaoCaixa-2.0.7-Source.zip') as z:
+            for n in z.namelist():
+              if pathlib.PurePosixPath(n).name in selected and ('/src/' in n or '/tests/' in n):
+                out=pathlib.Path('_workbench')/n
+                out.parent.mkdir(parents=True,exist_ok=True)
+                out.write_bytes(z.read(n))
+                print('Extraido',n)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add _workbench
+          git commit -m "chore: preparar fontes para correcoes de navegacao e atualizacao"
+          git push
