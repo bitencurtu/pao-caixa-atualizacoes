@@ -41,6 +41,7 @@ class MemoryBench {
       nav.SelectedIndex=i%4;
       Invoke(form,"LoadPage");
       Pump(16);
+      if(i<=12)Sample(new[]{"Pedidos","Produtos","Configurações","Meu perfil"}[i%4],i);
       if(i%20==0)Sample("switch",i);
      }
      nav.SelectedIndex=1;Invoke(form,"LoadPage");Pump(100);
