@@ -1,0 +1,50 @@
+name: Preparar e validar fontes 2.0.11
+on:
+  push:
+    branches: [fix/prefetch-and-paints-2011]
+    paths: ['.github/workflows/package-2011.yml']
+permissions:
+  contents: write
+jobs:
+  empacotar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Montar ZIP sobre 2.0.10 sem perder dados ou funcionalidades
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile
+          base=pathlib.Path("PaoCaixa-2.0.10-Source.zip")
+          output=pathlib.Path("PaoCaixa-2.0.11-Source.zip")
+          names=["src/MainForm.cs","src/PresentationPages.cs","src/Ui.cs","tests/VisualBehaviorTests.cs"]
+          edits={"pao-caixa-nativo/"+n:(pathlib.Path("_stage2011/pao-caixa-nativo")/n).read_bytes() for n in names}
+          patched=set()
+          with zipfile.ZipFile(base) as old,zipfile.ZipFile(output,"w") as new:
+           for info in old.infolist():
+            contents=old.read(info.filename)
+            if info.filename in edits:
+             contents=edits[info.filename]
+             patched.add(info.filename)
+            if info.filename.endswith((".cs",".json",".nsi",".config",".md",".xml",".mjs",".txt")):
+             contents=contents.replace(b"2.0.10",b"2.0.11")
+            new.writestr(info,contents)
+          assert patched==set(edits),(patched,set(edits))
+          with zipfile.ZipFile(output) as z:
+           a=z.read("pao-caixa-nativo/src/MainForm.cs")
+           b=z.read("pao-caixa-nativo/src/PresentationPages.cs")
+           c=z.read("pao-caixa-nativo/src/Ui.cs")
+           assert b"cashViewReady=loaded as CashView" in a
+           assert b"reportViewReady=loaded as ReportView" in a
+           assert b"showReport(initial" in b
+           assert b"new ConditionalWeakTable" in c
+           assert b'!define VERSION "2.0.11"' in z.read("pao-caixa-nativo/installer.nsi")
+           assert b'public const string Version="2.0.11"' in z.read("pao-caixa-nativo/src/Updates.cs")
+          print("Pacote produzido",output,output.stat().st_size)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PaoCaixa-2.0.11-Source.zip
+          git rm -qr _stage2011 .github/workflows/extract-ui-2011.yml .github/workflows/package-2011.yml
+          git commit -m "fix: pré-carregar dados e evitar repinturas redundantes (2.0.11)"
+          git push
