@@ -2,7 +2,7 @@ name: Medir navegação 2.0.11 vs correção
 on:
   push:
     branches: [perf/profile-navigation-2012]
-    paths: ['.github/workflows/nav-compare.yml', 'tools/NavLatencyTests.cs']
+    paths: ['.github/workflows/nav-compare.yml', 'tools/NavLatencyTests.cs', '_nav2012/pao-caixa-nativo/src/MainForm.cs']
 permissions:
   contents: read
 jobs:
