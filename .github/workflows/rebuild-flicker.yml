@@ -1,0 +1,41 @@
+name: Revalidar correcao
+on:
+  push:
+    branches: [fix/ui-flicker-20261024]
+    paths: ['.github/workflows/rebuild-flicker.yml']
+permissions:
+  contents: write
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identificar marcadores da versao anterior
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          with zipfile.ZipFile('PaoCaixa-2.0.6-Source.zip') as z:
+           for n in z.namelist():
+            if not n.endswith(('.cs','.json','.nsi','.config','.md','.xml','.mjs','.txt')): continue
+            b=z.read(n)
+            if b'2.0.5' in b: 
+             print(n,[(x+1,l[:240]) for x,l in enumerate(b.decode('utf-8-sig',errors='replace').splitlines()) if '2.0.5' in l][:12])
+          PY
+      - name: Substituir identificadores da versao 2.0.5 na nova versao
+        run: |
+          python3 - <<'PY'
+          import zipfile,io,pathlib
+          p=pathlib.Path('PaoCaixa-2.0.6-Source.zip')
+          with zipfile.ZipFile(p) as z: content=[(i,z.read(i.filename)) for i in z.infolist()]
+          with zipfile.ZipFile('tmp.zip','w') as z:
+           for i,b in content:
+            if i.filename.endswith(('.cs','.json','.nsi','.config')) and b'2.0.5' in b:
+             b=b.replace(b'2.0.5',b'2.0.6')
+            z.writestr(i,b)
+          pathlib.Path('tmp.zip').replace(p)
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add PaoCaixa-2.0.6-Source.zip
+          git commit -m "fix: sincronizar versao nos metadados do executavel"
+          git push
