@@ -48,7 +48,7 @@ class NavigationLatencyTests {
        }
        Thread.Sleep(3);
       }
-      Check(completed,"Navigation timed out: "+page);
+      Check(completed,"Navigation timed out: "+page+" actual="+Get(form,"page")+" nav="+nav.SelectedPage+" busy="+Get(form,"busy")+" init="+Get(form,"initializing")+" bodyChanged="+(!Object.ReferenceEquals(Get(form,"body"),previous))+" bodyParent="+(((Control)Get(form,"body")).Parent!=null)+" status="+((Label)Get(form,"status")).Text);
       Pump(20);
       double duration=watch.Elapsed.TotalMilliseconds;
       Console.WriteLine("NAV_LATENCY;"+page+";"+duration.ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
