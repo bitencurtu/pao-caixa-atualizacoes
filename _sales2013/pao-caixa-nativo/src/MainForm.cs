@@ -400,8 +400,77 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   void CashMovement(string kind){using(var f=new Fields(kind=="supply"?"Suprimento":"Sangria")){f.ClientSize=new Size(470,200);var amount=f.TextField("Valor (R$)");var reason=f.TextField("Motivo");if(Ui.Show(this,f)!=DialogResult.OK)return;long n=D.Parse(amount.Text,100);string text=reason.Text;Fire(()=>{db.MoveCash(kind,n,text);return null;},x=>LoadPage());}}
   void CloseCash(Totals t){using(var f=new Fields("Conferir e fechar caixa")){var inputs=new List<TextBox>();for(int i=0;i<4;i++)inputs.Add(f.TextField(D.MethodNames[i]+" contado",((i==0?t.drawer:t.payments[D.Methods[i]])/100m).ToString("0.00",D.BR)));f.Add("Dinheiro esperado",Ui.Label(D.Money(t.drawer)));if(Ui.Show(this,f)!=DialogResult.OK)return;var amounts=new Dictionary<string,long>();for(int i=0;i<4;i++)amounts[D.Methods[i]]=D.Parse(inputs[i].Text,100);Fire(()=>{db.CloseCash(amounts);return null;},x=>LoadPage());}}
   static string LocalDate(string s){DateTime d;return DateTime.TryParse(s,out d)?d.ToLocalTime().ToString("dd/MM/yyyy HH:mm"):s;}
-  void BuildSales(){var p=Content();var bar=Ui.Flow();var from=new DateField{Value=DateTime.Today};var to=new DateField{Value=DateTime.Today};var fromLabel=Ui.Caption("De");fromLabel.Margin=new Padding(6,14,6,0);var toLabel=Ui.Caption("até");toLabel.Margin=new Padding(6,14,6,0);bar.Controls.Add(fromLabel);bar.Controls.Add(from);bar.Controls.Add(toLabel);bar.Controls.Add(to);var grid=Ui.Grid("Nº","Data","Operador","Total","Pagamento","Situação");int offset=0;PaginationBar pager=null;List<Sale> rows=null;Action fetch=()=>{DateTime a=from.Value.Date,b=to.Value.Date.AddDays(1);if(b<=a)throw new Exception("Confira o período.");Fire(()=>db.Sales(a,b,offset),x=>{rows=(List<Sale>)x;grid.Rows.Clear();foreach(var v in rows.Take(100)){int n=grid.Rows.Add(v.number,LocalDate(v.at),v.operatorName,D.Money(v.total),string.Join(" + ",v.payments.Select(z=>D.MethodNames[Array.IndexOf(D.Methods,z.method)])),v.status=="paid"?"Concluída":"Cancelada");grid.Rows[n].Tag=v;}pager.PageText="Página "+(offset/100+1);pager.Previous.Enabled=offset>0;pager.Next.Enabled=rows.Count>100;ApplyTheme();});};bar.Controls.Add(Ui.Button("Consultar",()=>{offset=0;fetch();}));pager=new PaginationBar(()=>{offset=Math.Max(0,offset-100);fetch();},()=>{if(rows!=null&&rows.Count>100){offset+=100;fetch();}});
-   var bottom=Ui.Flow();bottom.Dock=DockStyle.Bottom;bottom.Controls.Add(Ui.Button("Ver / imprimir comprovante",()=>{if(grid.CurrentRow!=null)Receipt((Sale)grid.CurrentRow.Tag);}));if(user.role!="financial")bottom.Controls.Add(Ui.Button("Cancelar venda",()=>{if(grid.CurrentRow==null)return;var v=(Sale)grid.CurrentRow.Tag;using(var f=new Fields("Cancelar venda #"+v.number)){f.ClientSize=new Size(460,170);var why=f.TextField("Motivo");if(Ui.Show(this,f)!=DialogResult.OK)return;string reason=why.Text;Fire(()=>{db.Cancel(v.id,reason);products=db.Products();return null;},x=>{BeginInvoke(fetch);});}}));p.Controls.Add(grid);p.Controls.Add(bottom);p.Controls.Add(pager);p.Controls.Add(bar);BeginInvoke(fetch);}
+  // Dados iniciais carregados antes da primeira pintura da pagina.
+  // Consultas por periodo/paginacao nao desabilitam a janela inteira.
+  void BuildSales(){
+   var initial=salesViewReady;salesViewReady=null;
+   if(initial==null)throw new InvalidOperationException("O histórico de vendas ainda não foi carregado.");
+   var p=Content();
+   var bar=Ui.Flow();
+   var from=new DateField{Value=DateTime.Today},to=new DateField{Value=DateTime.Today};
+   var fromLabel=Ui.Caption("De");fromLabel.Margin=new Padding(6,14,6,0);
+   var toLabel=Ui.Caption("até");toLabel.Margin=new Padding(6,14,6,0);
+   bar.Controls.Add(fromLabel);bar.Controls.Add(from);bar.Controls.Add(toLabel);bar.Controls.Add(to);
+   var grid=Ui.Grid("Nº","Data","Operador","Total","Pagamento","Situação");
+   int offset=0,fetchGeneration=0;
+   List<Sale> rows=initial;
+   PaginationBar pager=null;
+   Action<List<Sale>> showRows=data=>{
+    if(grid.IsDisposed||pager==null)return;
+    // Preparar linhas desconectadas: evita 100 ciclos de repaint/relayout.
+    var prepared=new List<DataGridViewRow>();
+    foreach(var v in data.Take(100)){
+     var row=(DataGridViewRow)grid.RowTemplate.Clone();
+     row.CreateCells(grid,v.number,LocalDate(v.at),v.operatorName,D.Money(v.total),
+      string.Join(" + ",v.payments.Select(z=>D.MethodNames[Array.IndexOf(D.Methods,z.method)])),
+      v.status=="paid"?"Concluída":"Cancelada");
+     row.Tag=v;
+     prepared.Add(row);
+    }
+    grid.SuspendLayout();
+    try{
+     grid.Rows.Clear();
+     if(prepared.Count>0)grid.Rows.AddRange(prepared.ToArray());
+     rows=data;
+     pager.PageText="Página "+(offset/100+1);
+     pager.Previous.Enabled=offset>0;
+     pager.Next.Enabled=data.Count>100;
+    }finally{grid.ResumeLayout(false);}
+    if(grid.IsHandleCreated)grid.Invalidate();
+   };
+   Action fetch=async ()=>{
+    int ticket=++fetchGeneration,selectedOffset=offset;
+    int pageSerial=pageLoadSerial;
+    try{
+     DateTime a=from.Value.Date,b=to.Value.Date.AddDays(1);
+     if(b<=a)throw new Exception("Confira o período.");
+     // Resposta obsoleta nunca pode alterar outra pagina ou pesquisa nova.
+     // Nao usar Fire: habilitar/desabilitar todos os controles causa flicker.
+     var loaded=await Task.Run(()=>{lock(db.Sync)return db.Sales(a,b,selectedOffset);});
+     if(ticket!=fetchGeneration||IsDisposed||p.IsDisposed||pageSerial!=pageLoadSerial||page!="Vendas"||nav.SelectedPage!="Vendas")return;
+     showRows(loaded);
+    }catch(Exception ex){
+     if(!IsDisposed&&!p.IsDisposed&&ticket==fetchGeneration&&pageSerial==pageLoadSerial)
+      MessageBox.Show(this,ex.Message,"Não foi possível consultar vendas");
+    }
+   };
+   bar.Controls.Add(Ui.Button("Consultar",()=>{offset=0;fetch();}));
+   pager=new PaginationBar(()=>{offset=Math.Max(0,offset-100);fetch();},()=>{if(rows!=null&&rows.Count>100){offset+=100;fetch();}});
+   var bottom=Ui.Flow();bottom.Dock=DockStyle.Bottom;
+   bottom.Controls.Add(Ui.Button("Ver / imprimir comprovante",()=>{if(grid.CurrentRow!=null)Receipt((Sale)grid.CurrentRow.Tag);}));
+   if(user.role!="financial")bottom.Controls.Add(Ui.Button("Cancelar venda",()=>{
+    if(grid.CurrentRow==null)return;
+    var v=(Sale)grid.CurrentRow.Tag;
+    using(var f=new Fields("Cancelar venda #"+v.number)){
+     f.ClientSize=new Size(460,170);var why=f.TextField("Motivo");
+     if(Ui.Show(this,f)!=DialogResult.OK)return;
+     string reason=why.Text;
+     Fire(()=>{db.Cancel(v.id,reason);products=db.Products();return null;},x=>{if(!p.IsDisposed&&page=="Vendas")fetch();});
+    }
+   }));
+   p.Controls.Add(grid);p.Controls.Add(bottom);p.Controls.Add(pager);p.Controls.Add(bar);
+   showRows(initial);
+  }
   void Receipt(Sale v){var b=new StringBuilder();b.AppendLine(shop.name);b.AppendLine("Comprovante de venda #"+v.number);b.AppendLine(LocalDate(v.at)+" • "+v.operatorName);b.AppendLine("Situação: "+(v.status=="paid"?"Concluída":"Cancelada"));b.AppendLine();foreach(var i in v.items){b.AppendLine(i.name);b.AppendLine(D.Qty(i.quantity,i.unit)+" "+i.unit+" x "+D.Money(i.price)+" = "+D.Money(i.total));}b.AppendLine();b.AppendLine("Subtotal: "+D.Money(v.subtotal));b.AppendLine("Desconto: "+D.Money(v.discount));b.AppendLine("TOTAL: "+D.Money(v.total));foreach(var x in v.payments)b.AppendLine(D.MethodNames[Array.IndexOf(D.Methods,x.method)]+": "+D.Money(x.amount));b.AppendLine("Recebido: "+D.Money(v.cashReceived));b.AppendLine("Troco: "+D.Money(v.change));if(!string.IsNullOrWhiteSpace(v.note))b.AppendLine(v.note);b.AppendLine();b.AppendLine(shop.footer);string receipt=b.ToString();using(var f=new Form{Text="Comprovante #"+v.number,Size=new Size(530,650),StartPosition=FormStartPosition.CenterParent,Font=Font}){var t=new TextBox{Multiline=true,ReadOnly=true,Dock=DockStyle.Fill,ScrollBars=ScrollBars.Vertical,Text=receipt,Font=new Font("Consolas",10)};var bar=Ui.Flow();bar.Dock=DockStyle.Bottom;bar.Controls.Add(Ui.Button("Imprimir",()=>{using(var doc=new PrintDocument()){var lines=receipt.Split(new char[] { '\n' });int line=0;doc.BeginPrint+=(s,e)=>line=0;doc.PrintPage+=(s,e)=>{using(var font=new Font("Consolas",10)){float y=e.MarginBounds.Top;while(line<lines.Length){string text=lines[line].TrimEnd(new char[] { '\r' });float height=Math.Max(font.GetHeight(e.Graphics),e.Graphics.MeasureString(text,font,e.MarginBounds.Width).Height);if(y+height>e.MarginBounds.Bottom)break;e.Graphics.DrawString(text,font,Brushes.Black,new RectangleF(e.MarginBounds.Left,y,e.MarginBounds.Width,height));y+=height;line++;}e.HasMorePages=line<lines.Length;}};using(var pd=new PrintDialog{Document=doc,UseEXDialog=true})if(pd.ShowDialog(f)==DialogResult.OK)doc.Print();}}));bar.Controls.Add(Ui.Button("Guardar TXT",()=>{using(var s=new SaveFileDialog{Filter="Texto|*.txt",FileName="Venda-"+v.number+".txt"})if(s.ShowDialog(f)==DialogResult.OK)File.WriteAllText(s.FileName,receipt,Encoding.UTF8);}));f.Controls.Add(t);f.Controls.Add(bar);Ui.Show(this,f);}}
   void BuildProducts(bool stock){var p=Content();var bar=Ui.Flow();var find=new TextBox{Width=220,Margin=new Padding(4,9,4,4)};bar.Controls.Add(Ui.Label("Buscar:"));bar.Controls.Add(find);var grid=Ui.Grid("Código","Produto","Categoria","Unidade","Preço","Estoque","Mínimo","Ativo");Action fill=()=>{grid.Rows.Clear();string q=find.Text.Trim();foreach(var x in products.Where(x=>x.name.IndexOf(q,StringComparison.CurrentCultureIgnoreCase)>=0||x.code.IndexOf(q,StringComparison.OrdinalIgnoreCase)>=0).Take(300)){int n=grid.Rows.Add(x.code,x.name,x.category,x.unit,D.Money(x.price),D.Qty(x.stock,x.unit),D.Qty(x.minStock,x.unit),x.active?"Sim":"Não");grid.Rows[n].Tag=x;}};find.TextChanged+=(s,e)=>fill();if(!stock){bar.Controls.Add(Ui.Primary("Novo produto",()=>EditProduct(null),"plus"));bar.Controls.Add(Ui.Button("Editar produto",()=>{var x=SelectedProduct(grid);if(x!=null)EditProduct(x);}));}bar.Controls.Add(Ui.Button("Ajustar estoque",()=>{var x=SelectedProduct(grid);if(x!=null)Adjust(x);}));bar.Controls.Add(Ui.Button("Ver movimentações",()=>{var x=SelectedProduct(grid);if(x!=null)StockLedger(x);}));var info=Ui.Label("Até 300 produtos por busca. Use nome ou código para localizar.");info.Dock=DockStyle.Bottom;p.Controls.Add(grid);p.Controls.Add(info);p.Controls.Add(bar);fill();}
   void EditProduct(Product old){using(var f=new Fields(old==null?"Novo produto":"Editar produto")){f.ClientSize=new Size(540,545);var name=f.TextField("Nome",old==null?"":old.name);var code=f.TextField("Código / barras",old==null?"":old.code);var category=f.TextField("Categoria",old==null?"":old.category);var unit=f.Choice("Unidade",new[]{"un","kg"},old!=null&&old.unit=="kg"?1:0);unit.Enabled=old==null;var price=f.TextField("Preço (R$)",old==null?"":(old.price/100m).ToString("0.00",D.BR));var cost=f.TextField("Custo (R$)",old==null?"0,00":(old.cost/100m).ToString("0.00",D.BR));var quantity=f.TextField("Estoque inicial",old==null?"0":D.Qty(old.stock,old.unit));quantity.Enabled=old==null;var min=f.TextField("Estoque mínimo",old==null?"0":D.Qty(old.minStock,old.unit));var active=f.Check("Produto ativo",old==null||old.active);if(Ui.Show(this,f)!=DialogResult.OK)return;var x=new Product{id=old==null?null:old.id,name=name.Text,code=code.Text,category=category.Text,unit=unit.SelectedItem.ToString(),price=D.Parse(price.Text,100),cost=D.Parse(cost.Text,100),stock=D.Parse(quantity.Text,1000),minStock=D.Parse(min.Text,1000),active=active.Checked,icon=old==null?"bread":old.icon};Fire(()=>{db.SaveProduct(x);return null;},r=>Reload());}}
