@@ -1,0 +1,32 @@
+name: Preparar diagnóstico de navegação 2.0.11
+on:
+  push:
+    branches: [perf/profile-navigation-2012]
+    paths: ['.github/workflows/nav-source-extract.yml']
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extrair fontes do projeto para análise
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile
+          with zipfile.ZipFile('PaoCaixa-2.0.11-Source.zip') as z:
+           files=['src/MainForm.cs','src/Ui.cs','src/PresentationPages.cs','src/SettingsPage.cs','src/Models.cs','src/Store.cs','src/VisualControls.cs','tests/VisualBehaviorTests.cs']
+           for f in files:
+            entry='pao-caixa-nativo/'+f
+            out=pathlib.Path('_nav2012')/entry
+            out.parent.mkdir(parents=True,exist_ok=True)
+            data=z.read(entry)
+            out.write_bytes(data)
+            print(f,len(data))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _nav2012
+          git commit -m 'test: extrair fontes para analisar lentidao e flicker'
+          git push
