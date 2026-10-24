@@ -265,10 +265,10 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    if(wanted=="Painel Biel"||wanted=="Meu caixa"||wanted=="Visão geral"||wanted=="Relatórios"){
     status.Text="Carregando "+SideNavigation.Title(wanted)+"…";
     object loaded=null;
+    long dbStarted=Stopwatch.GetTimestamp();
     try{
      DateTime today=DateTime.Today;
      int movesPage=cashOffset,registerPage=registerOffset;
-     long dbStarted=Stopwatch.GetTimestamp();
      loaded=await Task.Run(()=>{
       lock(db.Sync){
        if(wanted=="Painel Biel")return (object)new OwnerView{users=db.Users(),control=db.Control(),audit=db.AuditList()};
