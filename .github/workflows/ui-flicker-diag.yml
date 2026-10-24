@@ -1,0 +1,68 @@
+name: Diagnóstico visual WinForms (sem publicar)
+on:
+  push:
+    branches: [diagnostics/flicker-root-cause-20261024]
+    paths: ['.github/workflows/ui-flicker-diag.yml', 'tools/UiFlickerDiag.cs']
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Extrair e instrumentar versão de produção
+        shell: pwsh
+        run: |
+          Expand-Archive 'PaoCaixa-2.0.9-Source.zip' -DestinationPath diagnostic -Force
+          @'
+          import pathlib
+          p=pathlib.Path('diagnostic/pao-caixa-nativo/src/MainForm.cs')
+          s=p.read_text(encoding='utf-8-sig')
+          before='  void SwapPage(Panel previous,Panel next){'
+          after='''  static int UiNativeWindows(Control c) {
+             int n=c.IsHandleCreated?1:0;
+             foreach(Control child in c.Controls)n+=UiNativeWindows(child);
+             return n;
+            }
+            void SwapPage(Panel previous,Panel next){
+             int descendants=0;foreach(Control c in next.Controls)descendants+=1+c.Controls.Count;
+             Console.WriteLine("TRACE_NATIVE;PRE;"+page+";NEXT_HANDLE="+next.IsHandleCreated+";NEXT_NATIVE="+UiNativeWindows(next)+";CHILDREN="+descendants+";PREV_NATIVE="+UiNativeWindows(previous));
+             next.Paint+=(s,e)=>Console.WriteLine("TRACE_PAINT;NEXT_PANEL;"+page+";NATIVE="+UiNativeWindows(next));
+          '''
+          assert s.count(before)==1
+          s=s.replace(before,after)
+          before='    shell.Controls.Add(next);'
+          after='''    shell.Controls.Add(next);
+             Console.WriteLine("TRACE_NATIVE;ADDED;"+page+";NEXT_HANDLE="+next.IsHandleCreated+";NEXT_NATIVE="+UiNativeWindows(next)+";PREV_IN_PARENT="+(previous.Parent==shell));
+          '''
+          assert s.count(before)==1
+          s=s.replace(before,after)
+          before='    previous.Dispose();'
+          after='''    previous.Dispose();
+             Console.WriteLine("TRACE_NATIVE;SWAPPED;"+page+";NEXT_NATIVE="+UiNativeWindows(next)+";PREV_DISPOSED="+previous.IsDisposed);
+          '''
+          assert s.count(before)==1
+          s=s.replace(before,after)
+          p.write_text(s,encoding='utf-8-sig')
+          print('TRACE_READY')
+          '@ | python -
+          Set-Location diagnostic/pao-caixa-nativo
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          Copy-Item vendor/sqlite/sqlite3.dll build/sqlite3.dll -Force
+          node tests/create-legacy-fixture.mjs build/fixture
+          if($LASTEXITCODE -ne 0){ throw 'Fixture failed'; }
+      - name: Compilar e testar navegação com os controles reais
+        shell: pwsh
+        run: |
+          Set-Location diagnostic/pao-caixa-nativo
+          $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project = (Get-Location).Path
+          $sources = @(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $diag = (Resolve-Path '../../tools/UiFlickerDiag.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:UiDiag' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/UiDiag.exe' @sources $diag
+          if($LASTEXITCODE -ne 0){throw 'Compilação do diagnóstico falhou'}
+          & ./build/UiDiag.exe build/fixture
+          if($LASTEXITCODE -ne 0){throw 'Diagnóstico de navegação falhou'}
