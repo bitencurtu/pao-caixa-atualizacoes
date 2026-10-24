@@ -2,7 +2,7 @@ name: Testar e preparar Histórico de vendas 2.0.13
 on:
   push:
     branches: [fix/sales-history-flicker-2013]
-    paths: ['.github/workflows/package-sales-2013.yml']
+    paths: ['.github/workflows/package-sales-2013.yml', '_sales2013/pao-caixa-nativo/src/MainForm.cs']
 permissions:
   contents: write
 jobs:
