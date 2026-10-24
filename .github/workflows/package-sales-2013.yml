@@ -1,0 +1,71 @@
+name: Testar e preparar Histórico de vendas 2.0.13
+on:
+  push:
+    branches: [fix/sales-history-flicker-2013]
+    paths: ['.github/workflows/package-sales-2013.yml']
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar projeto e fixture de vendas
+        shell: pwsh
+        run: |
+          Expand-Archive 'PaoCaixa-2.0.12-Source.zip' -DestinationPath source -Force
+          Copy-Item '_sales2013/pao-caixa-nativo/src/MainForm.cs' 'source/pao-caixa-nativo/src/MainForm.cs' -Force
+          Set-Location 'source/pao-caixa-nativo'
+          New-Item -ItemType Directory 'build' -Force | Out-Null
+          Copy-Item 'vendor/sqlite/sqlite3.dll' 'build/sqlite3.dll' -Force
+          node tests/create-legacy-fixture.mjs build/sales-test-fixture
+          if($LASTEXITCODE -ne 0){throw 'Fixture de vendas não criada'}
+      - name: Validar renderização inicial de vendas e filtros no Windows
+        shell: pwsh
+        run: |
+          Set-Location 'source/pao-caixa-nativo'
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $harness=(Resolve-Path '../../tools/SalesHistoryVisualTests.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:SalesHistoryVisualTests' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/SalesHistoryVisualTests.exe' @sources $harness
+          if($LASTEXITCODE -ne 0){throw 'Falha compilação do histórico'}
+          & ./build/SalesHistoryVisualTests.exe build/sales-test-fixture
+          if($LASTEXITCODE -ne 0){throw 'Teste de flicker do histórico falhou'}
+      - name: Empacotar fontes 2.0.13 sem instrumentos de diagnóstico
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,zipfile
+          old=pathlib.Path('PaoCaixa-2.0.12-Source.zip')
+          new=pathlib.Path('PaoCaixa-2.0.13-Source.zip')
+          edit=pathlib.Path('_sales2013/pao-caixa-nativo/src/MainForm.cs').read_bytes()
+          found=0
+          with zipfile.ZipFile(old) as original,zipfile.ZipFile(new,'w') as output:
+           for entry in original.infolist():
+            data=original.read(entry.filename)
+            if entry.filename=='pao-caixa-nativo/src/MainForm.cs':
+             data=edit;found+=1
+            if entry.filename.endswith(('.cs','.json','.nsi','.config','.md','.xml','.mjs','.txt')):
+             data=data.replace(b'2.0.12',b'2.0.13')
+            output.writestr(entry,data)
+          assert found==1
+          with zipfile.ZipFile(new) as z:
+           source=z.read('pao-caixa-nativo/src/MainForm.cs')
+           assert b'var initial=salesViewReady' in source
+           assert b'grid.Rows.AddRange(prepared.ToArray())' in source
+           assert b'BeginInvoke(fetch)' not in source
+           assert b'public const string Version="2.0.13"' in z.read('pao-caixa-nativo/src/Updates.cs')
+           assert b'!define VERSION "2.0.13"' in z.read('pao-caixa-nativo/installer.nsi')
+          print('ZIP otimizado:',new,new.stat().st_size)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Empacotamento falhou'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PaoCaixa-2.0.13-Source.zip
+          git rm -r _sales2013 .github/workflows/extract-sales-2013.yml .github/workflows/package-sales-2013.yml tools/SalesHistoryVisualTests.cs
+          git commit -m "fix: histórico de vendas pré-carregado com atualização da tabela em lote"
+          git push
