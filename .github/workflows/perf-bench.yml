@@ -30,7 +30,8 @@ jobs:
           $csc = Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
           $project = (Get-Location).Path
           $sources = @(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
-          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:MemoryBench' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/MemoryBench.exe' @sources '../../tools/MemoryBench.cs'
+          $bench = (Resolve-Path '../../tools/MemoryBench.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:MemoryBench' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/MemoryBench.exe' @sources $bench
           if($LASTEXITCODE -ne 0) { throw 'Falha ao compilar benchmark.' }
       - name: Medir baseline Windows
         shell: pwsh
