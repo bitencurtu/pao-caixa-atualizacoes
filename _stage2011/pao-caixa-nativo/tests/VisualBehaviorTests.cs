@@ -29,6 +29,14 @@ class VisualBehaviorTests {
     var message=WheelMessage(label,label.PointToScreen(new Point(10,10)),-120);bool routed=router.PreFilterMessage(ref message);Pump(750);Check(lines==0?!routed:routed&&Math.Abs(panel.AutoScrollPosition.Y)>0,"wheel over label reaches the hovered viewport");
     panel.AutoScrollPosition=Point.Empty;var grid=Ui.Grid("Data");grid.Dock=DockStyle.None;grid.SetBounds(15,100,280,150);panel.Controls.Add(grid);Pump(30);message=WheelMessage(grid,grid.PointToScreen(new Point(30,50)),-120);Check(!router.PreFilterMessage(ref message),"native grids keep their own wheel behavior");
     var font=grid.ColumnHeadersDefaultCellStyle.Font;Ui.Apply(grid);font=grid.ColumnHeadersDefaultCellStyle.Font;for(int i=0;i<30;i++){Ui.Dark=i%2==0;Ui.Apply(grid);}Check(object.ReferenceEquals(font,grid.ColumnHeadersDefaultCellStyle.Font),"theme changes reuse the owned grid header font");grid.Dispose();
+    var probe=Ui.Primary("Teste",()=>{},"check");probe.SetBounds(10,10,150,40);panel.Controls.Add(probe);Pump(10);
+    Ui.Dark=false;Ui.Apply(probe);Pump(10);
+    int repaints=0;probe.Invalidated+=(sender,e)=>repaints++;
+    Ui.Apply(probe);Ui.Apply(probe);
+    Check(repaints==0,"aplicar o mesmo tema nao invalida botoes novamente");
+    Ui.Dark=true;Ui.Apply(probe);
+    Check(repaints>0,"mudar o tema invalida botoes para atualizar a aparencia");
+    probe.Dispose();
     var text=new TextBox{Multiline=true,Location=new Point(20,160),Size=new Size(180,90)};panel.Controls.Add(text);Pump(20);message=WheelMessage(text,text.PointToScreen(new Point(10,10)),-120);Check(!router.PreFilterMessage(ref message),"multiline text keeps its own wheel behavior");text.Dispose();
    }
    panel.Dispose();
