@@ -62,7 +62,7 @@ class SettingsOperatorRemovalTests {
    Check(done,"name and receipt footer saved through UI");
    Console.WriteLine("SETTINGS_OPERATOR_REMOVAL_DONE");
   }catch(Exception ex){failed=true;Console.Error.WriteLine(ex);}
-  finally{form.Close();}
+  finally{Set(form,"busy",false);Set(form,"closingForUpdate",true);form.Close();}
  }
  [STAThread] static void Main(string[] args){
   try{
