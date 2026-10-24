@@ -2,7 +2,9 @@
 
 PDV Windows nativo, SQLite local e controle remoto Cloudflare.
 
-O código da versão 2.0.6 está em `PaoCaixa-2.0.6-Source.zip`. A automação [.github/workflows/publicar.yml](.github/workflows/publicar.yml) compila e testa no Windows antes de publicar uma release nova. Pull requests validam sem publicar; alterações integradas em main publicam apenas depois dos testes.
+O código da versão 2.0.7 está em `PaoCaixa-2.0.7-Source.zip`. A automação [.github/workflows/publicar.yml](.github/workflows/publicar.yml) compila e testa no Windows antes de publicar uma release nova. Pull requests validam sem publicar; alterações integradas em main publicam apenas depois dos testes.
+
+A 2.0.7 remove o campo obsoleto de operador padrão das configurações e reúne a atualização manual em **Atualizar programa**: consulta, download, verificação, backup e instalação com reinício. O fluxo protege caixas/pedidos abertos e mostra o andamento. O operador continua sendo a conta autenticada, e os backups antigos permanecem compatíveis.
 
 A 2.0.6 apresenta avisos neutros de acesso bloqueado na tela de suspensão, na verificação de liberação e nos erros das operações. Os detalhes de conexão ficam no diagnóstico exclusivo do proprietário; a política de bloqueio e a persistência offline permanecem iguais.
 
