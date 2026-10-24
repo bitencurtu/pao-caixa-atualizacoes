@@ -12,14 +12,14 @@ namespace PaoCaixa {
  public partial class MainForm:Form {
   readonly string dataDir; readonly RemoteControl remote; Store db;Preferences prefs;User user;Settings shop;
   readonly Panel shell=new Panel{Dock=DockStyle.Fill};
-  readonly Panel body=new Panel{Dock=DockStyle.Fill,Padding=new Padding(28)};
+  Panel body=new Panel{Dock=DockStyle.Fill,Padding=new Padding(28)};
   readonly SideNavigation nav=new SideNavigation{Visible=false};
   readonly TopBar header=new TopBar();
   readonly Label status=Ui.Caption("Abrindo os dados…");
   readonly ThemeSwitch theme;
   readonly SmoothWheelRouter wheelRouter;
 
-  bool busy,initializing=true,closingForUpdate;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
+  bool busy,initializing=true,closingForUpdate,updateFlowRunning;int pageLoadSerial;OwnerView ownerViewReady;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
   List<Product> products=new List<Product>();Draft draft=new Draft();ProductCatalog catalogue;DataGridView cartGrid;CartList cartView;CategoryTabs categories;TextBox search,discount,note;Label total,subtotal,catalogCaption;SectionHeading cartHeading;Button receive;bool filling;Register currentRegister;bool cashOccupied;long nextNumber;
   readonly Timer draftTimer=new Timer{Interval=450};readonly Timer updateTimer=new Timer{Interval=30000};
   // Consulta automatica em segundo plano a cada 15 segundos. Nunca bloqueia a UI
@@ -45,7 +45,7 @@ namespace PaoCaixa {
    draftTimer.Tick+=(sender,e)=>{draftTimer.Stop();if(!busy&&user!=null&&user.role!="financial")SaveDraft(null);else draftTimer.Start();};
    Shown+=async(sender,e)=>{await Run(()=>{remote.Check();db=new Store(dataDir,remote);try{db.DailyBackup();}catch{statusText="Backup diário não concluído. Confira o espaço livre em Configurações.";}return null;});if(!IsDisposed&&db!=null){started=true;await UpdateBeforeLogin();}};
    FormClosing+=(sender,e)=>{if(closingForUpdate)return;if(startupRunning){e.Cancel=true;startupCloseRequested=true;startupCancellation.Cancel();return;}if(busy){e.Cancel=true;return;}if(user!=null&&user.role!="financial"){try{lock(db.Sync)db.SetDraft(Snapshot());}catch(Exception ex){e.Cancel=true;MessageBox.Show(ex.Message,"Não foi possível guardar o pedido");}}};
-   updateTimer.Tick+=(sender,e)=>{if(user!=null&&user.role=="admin"&&!busy&&!updateChecking&&!updateDownloading){CheckUpdate();updateTimer.Interval=4*60*60*1000;}};updateTimer.Start();
+   updateTimer.Tick+=(sender,e)=>{if(user!=null&&user.role=="admin"&&!busy&&!updateChecking&&!updateDownloading&&!updateFlowRunning){CheckUpdate();updateTimer.Interval=4*60*60*1000;}};updateTimer.Start();
    remoteTimer.Tick+=(sender,e)=>{
     if(!started||IsDisposed)return;
     // Se o bloqueio chegou enquanto havia uma operacao/dialogo, aplica
@@ -74,7 +74,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   async void Fire(Func<object> work,Action<object> then=null){await Run(work,then);}
   static string RoleName(string r){return r=="operator"?"Operador":r=="financial"?"Financeiro":"Administrador";}
   void Root(string caption){
-   body.SuspendLayout();if(cartGrid!=null){cartGrid.Dispose();cartGrid=null;}
+   body.SuspendLayout();cartGrid=null;
    foreach(Control c in body.Controls.Cast<Control>().ToArray())c.Dispose();body.Controls.Clear();
    string description=caption=="Pedidos"?"Uma venda de cada vez. Tudo sob controle.":caption=="Visão geral"?"Os números de hoje, sem complicação.":caption=="Produtos"?"Os produtos da sua padaria, com preço e estoque sempre à mão.":caption=="Meu caixa"?"Abra, acompanhe e confira o movimento do seu caixa.":caption=="Vendas"?"Cada venda registrada, do pedido ao pagamento.":caption=="Relatórios"?"Entenda o movimento e os produtos que fazem o dia render.":caption=="Configurações"?"Deixe o sistema do jeito da sua padaria.":caption=="Meu perfil"?"Sua conta e sua senha.":caption=="Painel Biel"?"Contas, permissões e controle da instalação.":"Entre com a conta criada pelo administrador.";
    var h=new PageHeading(SideNavigation.Title(caption),description,caption=="Pedidos"?"TUDO PRONTO PARA ATENDER":null);body.Controls.Add(h);body.ResumeLayout();RefreshShell();
@@ -179,21 +179,57 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   Draft Snapshot(){return J.Read<Draft>(J.Write(draft));}
   void SaveDraft(Action next){var d=Snapshot();Fire(()=>{db.SetDraft(d);return null;},x=>{if(next!=null)next();});}
   void FlushDraftThen(Action next){draftTimer.Stop();if(user!=null&&user.role!="financial")SaveDraft(next);else next();}
-  [System.Runtime.InteropServices.DllImport("user32.dll")]
-  static extern IntPtr SendMessage(IntPtr hwnd,int msg,IntPtr wParam,IntPtr lParam);
-  void BeginPageTransition(){
-   body.SuspendLayout();
-   // WM_SETREDRAW evita mostrar a pagina desmontada durante a troca.
-   if(body.IsHandleCreated)SendMessage(body.Handle,11,IntPtr.Zero,IntPtr.Zero);
+  // Prepara e configura a nova pagina fora da arvore visual. A anterior nao e desmontada.
+  void SwapPage(Panel previous,Panel next){
+   shell.SuspendLayout();
+   try{
+    int index=shell.Controls.GetChildIndex(previous);
+    shell.Controls.Add(next);
+    shell.Controls.SetChildIndex(next,index);
+    shell.Controls.Remove(previous);
+    previous.Dispose();
+   }finally{shell.ResumeLayout(true);}
+   next.Invalidate(true);
   }
-  void EndPageTransition(){
-   try{body.ResumeLayout(true);}
-   finally{
-    if(body.IsHandleCreated)SendMessage(body.Handle,11,new IntPtr(1),IntPtr.Zero);
-    body.Invalidate(true);
+  async void LoadPage(){
+   if(user==null)return;
+   int serial=++pageLoadSerial;
+   string wanted=nav.SelectedPage;
+   if(wanted=="Painel Biel"){
+    status.Text="Carregando seu painel…";
+    OwnerView loaded;
+    try{loaded=await Task.Run(()=>{lock(db.Sync)return new OwnerView{users=db.Users(),control=db.Control(),audit=db.AuditList()};});}
+    catch(Exception ex){if(!IsDisposed)MessageBox.Show(this,ex.Message,"Não foi possível carregar seu painel");return;}
+    if(IsDisposed||user==null||serial!=pageLoadSerial||nav.SelectedPage!=wanted)return;
+    ownerViewReady=loaded;
+   }
+   var previous=body;
+   var next=new Panel{Dock=DockStyle.Fill,Padding=new Padding(28),Size=previous.Size};
+   string previousPage=page;
+   body=next;
+   try{
+    page=wanted;Root(page);
+    switch(page){
+     case "Pedidos":BuildOrder();break;
+     case "Meu caixa":BuildCash();break;
+     case "Vendas":BuildSales();break;
+     case "Produtos":BuildProducts(false);break;
+     case "Estoque":BuildProducts(true);break;
+     case "Relatórios":BuildReport(false);break;
+     case "Visão geral":BuildReport(true);break;
+     case "Configurações":BuildSettings();break;
+     case "Meu perfil":BuildProfile();break;
+     case "Painel Biel":BuildOwner();break;
+    }
+    Ui.Apply(next);
+    SwapPage(previous,next);
+   }catch(Exception ex){
+    if(!next.IsDisposed)next.Dispose();
+    if(!previous.IsDisposed&&previous.Parent==shell)body=previous;
+    page=previousPage;ownerViewReady=null;
+    if(!IsDisposed){RefreshShell();MessageBox.Show(this,ex.Message,"Não foi possível abrir o painel");}
    }
   }
-  void LoadPage(){if(user==null)return;BeginPageTransition();try{page=nav.SelectedPage;Root(page);switch(page){case "Pedidos":BuildOrder();break;case "Meu caixa":BuildCash();break;case "Vendas":BuildSales();break;case "Produtos":BuildProducts(false);break;case "Estoque":BuildProducts(true);break;case "Relatórios":BuildReport(false);break;case "Visão geral":BuildReport(true);break;case "Configurações":BuildSettings();break;case "Meu perfil":BuildProfile();break;case "Painel Biel":BuildOwner();break;}ApplyTheme();}finally{EndPageTransition();}}
   void Reload(){PostUi(()=>{if(user!=null)Fire(()=>{ReadPresentation();return null;},x=>LoadPage());});}
   void BuildOrder(){
    var p=Content(false);p.AutoScroll=false;var left=new Panel();var right=new CardPanel{Padding=new Padding(0)};p.Controls.Add(left);p.Controls.Add(right);
@@ -255,12 +291,46 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   void BusinessBackup(){using(var f=new SaveFileDialog{Filter="Backup comercial|*.json",FileName="PaoCaixa-Dados-"+DateTime.Today.ToString("yyyy-MM-dd")+".json"}){if(f.ShowDialog(this)!=DialogResult.OK)return;string path=f.FileName;GuardOutput(path);Fire(()=>{File.WriteAllText(path,J.Write(db.Export()),Encoding.UTF8);return null;},x=>MessageBox.Show(this,"Backup comercial salvo. Para guardar contas e senhas, use Backup completo.","Backup"));}}
   void Restore(){using(var f=new OpenFileDialog{Filter="Backup comercial JSON|*.json"}){if(f.ShowDialog(this)!=DialogResult.OK)return;if(MessageBox.Show(this,"Substituir os dados comerciais pelo backup?\nAs contas serão mantidas. Um backup completo será criado antes.","Restaurar dados",MessageBoxButtons.YesNo,MessageBoxIcon.Question)!=DialogResult.Yes)return;string path=f.FileName;long revision;lock(db.Sync)revision=db.Revision();Fire(()=>{var state=J.Read<State>(File.ReadAllText(path));db.Restore(state,revision);return null;},x=>Reload());}}
   bool updateDownloading,updateChecking;
+  // Um unico comando seguro: procura, baixa, verifica e inicia a instalacao.
+  async void RunFullUpdate(){
+   if(updateFlowRunning||updateChecking||updateDownloading||busy)return;
+   updateFlowRunning=true;
+   try{
+    lock(db.Sync)db.Admin();
+    string url=prefs.url;
+    updateChecking=true;updates.Status="Procurando atualização…";UpdateStatus();
+    try{await Task.Run(()=>updates.Check(url));}finally{updateChecking=false;}
+    if(IsDisposed||Disposing)return;
+    if(updates.Available==null){UpdateStatus();return;}
+    Feed feed=updates.Available;
+    updateDownloading=true;updates.Status="Baixando a versão "+feed.version+"…";UpdateStatus();
+    try{
+     await Task.Run(()=>updates.Download(url,dataDir,percent=>PostUi(()=>{
+      if(updateDownloading&&updateLabel!=null&&!updateLabel.IsDisposed)
+       updateLabel.Text="Baixando versão "+feed.version+": "+percent+"%.";
+     })));
+    }finally{updateDownloading=false;}
+    if(IsDisposed||Disposing)return;
+    string installer=updates.Downloaded;
+    if(string.IsNullOrEmpty(installer))throw new InvalidOperationException("O instalador não foi baixado.");
+    updates.Status="Verificando o instalador e protegendo os dados…";UpdateStatus();
+    bool ready=false;
+    await Run(()=>{db.PrepareInstall();Updates.Verify(installer,feed);return null;},x=>ready=true);
+    if(!ready||IsDisposed||Disposing)return;
+    updates.Status="Iniciando a instalação da versão "+feed.version+"…";UpdateStatus();
+    var start=new ProcessStartInfo(installer,"--updated /D="+AppDomain.CurrentDomain.BaseDirectory.TrimEnd(new char[]{Path.DirectorySeparatorChar})){UseShellExecute=true};
+    Process.Start(start);closingForUpdate=true;Close();
+   }catch(Exception ex){
+    if(!IsDisposed&&!Disposing){updates.Status="Atualização não concluída: "+Updates.Describe(ex);UpdateStatus();}
+   }finally{updateChecking=false;updateDownloading=false;updateFlowRunning=false;}
+  }
+
   void UpdateStatus(){if(updateLabel!=null&&!updateLabel.IsDisposed)updateLabel.Text=updates.Status;if(user!=null&&user.role=="admin"&&updates.Available!=null)status.Text="Nova versão "+updates.Available.version+" • Abra Configurações para atualizar • "+user.name;}
-  async void CheckUpdate(){if(updateChecking||updateDownloading)return;try{lock(db.Sync)db.Admin();updateChecking=true;updates.Status="Procurando atualização…";UpdateStatus();string url=prefs.url;await Task.Run(()=>updates.Check(url));}catch(Exception ex){updates.Status=Updates.Describe(ex);}finally{updateChecking=false;if(!IsDisposed)UpdateStatus();}}
+  async void CheckUpdate(){if(updateChecking||updateDownloading||updateFlowRunning)return;try{lock(db.Sync)db.Admin();updateChecking=true;updates.Status="Procurando atualização…";UpdateStatus();string url=prefs.url;await Task.Run(()=>updates.Check(url));}catch(Exception ex){updates.Status=Updates.Describe(ex);}finally{updateChecking=false;if(!IsDisposed)UpdateStatus();}}
   async void DownloadUpdate(){if(updateDownloading||updateChecking)return;try{lock(db.Sync)db.Admin();if(updates.Available==null)throw new Exception("Procure uma nova versão antes de baixar.");updateDownloading=true;string url=prefs.url;await Task.Run(()=>updates.Download(url,dataDir,percent=>PostUi(()=>{if(updateDownloading&&updateLabel!=null&&!updateLabel.IsDisposed)updateLabel.Text="Baixando atualização: "+percent+"%. Você pode continuar vendendo.";})));}catch(Exception ex){if(!IsDisposed&&!Disposing)MessageBox.Show(this,ex.Message,"Atualização");}finally{updateDownloading=false;if(!IsDisposed)UpdateStatus();}}
   void InstallUpdate(){if(updateDownloading||updateChecking)throw new Exception("Aguarde a atualização terminar.");if(updates.Downloaded==null||updates.Available==null)throw new Exception("Baixe a atualização antes de instalar.");string exe=updates.Downloaded;Fire(()=>{db.PrepareInstall();Updates.Verify(exe,updates.Available);return null;},x=>{var start=new ProcessStartInfo(exe,"--updated /D="+AppDomain.CurrentDomain.BaseDirectory.TrimEnd(new char[] { Path.DirectorySeparatorChar })){UseShellExecute=true};Process.Start(start);closingForUpdate=true;Close();});}
   void BuildProfile(){var p=Content();var list=Ui.Flow();list.FlowDirection=FlowDirection.TopDown;list.WrapContents=false;list.Controls.Add(Ui.Label(user.name+"\n"+user.email+"\n"+RoleName(user.role),15));list.Controls.Add(Ui.Button("Alterar minha senha",()=>{using(var f=new Fields("Alterar senha")){var current=f.TextField("Senha atual","",true);var next=f.TextField("Nova senha","",true);var confirm=f.TextField("Repita a nova senha","",true);if(Ui.Show(this,f)!=DialogResult.OK)return;if(next.Text!=confirm.Text)throw new Exception("As novas senhas são diferentes.");string a=current.Text,b=next.Text;Fire(()=>{db.ChangePassword(a,b);return null;},x=>MessageBox.Show(this,"Senha alterada.","Conta"));}}));p.Controls.Add(list);}
-  void BuildOwner(){var p=Content();BeginInvoke(new Action(()=>Fire(()=>new OwnerView{users=db.Users(),control=db.Control(),audit=db.AuditList()},x=>{var v=(OwnerView)x;var bar=Ui.Flow();bar.Controls.Add(Ui.Label("ID remoto: "+remote.InstallationId,9));bar.Controls.Add(Ui.Button("Copiar ID",()=>Clipboard.SetText(remote.InstallationId)));if(remote.Enabled){bar.Controls.Add(Ui.Button("Painel remoto",()=>Process.Start(remote.PanelUrl)));bar.Controls.Add(Ui.Button("Testar Cloudflare",()=>DiagnoseRemote()));}else bar.Controls.Add(Ui.Label("Controle remoto não configurado",9));bar.Controls.Add(Ui.Label(v.control.blocked==1?"Bloqueio local ativo • "+v.control.reason:"Bloqueio local desativado",13));bar.Controls.Add(Ui.Button(v.control.blocked==1?"Desbloquear localmente":"Bloquear localmente",()=>{using(var f=new Fields(v.control.blocked==1?"Desbloquear localmente":"Bloquear localmente")){f.ClientSize=new Size(500,220);var why=f.TextField("Motivo",v.control.reason);f.Add("Sua conta",Ui.Label("Continua com acesso."));if(Ui.Show(this,f)!=DialogResult.OK)return;string reason=why.Text;Fire(()=>{db.Block(v.control.blocked!=1,reason);return null;},r=>LoadPage());}}));bar.Controls.Add(Ui.Button("Criar conta",()=>EditUser(null)));var grid=Ui.Grid("Nome","E-mail","Perfil","Ativa","Proprietário");foreach(var u in v.users){int n=grid.Rows.Add(u.name,u.email,RoleName(u.role),u.active==1?"Sim":"Não",u.Owner?"Protegido":"—");grid.Rows[n].Tag=u;}var bottom=Ui.Flow();bottom.Dock=DockStyle.Bottom;bottom.Controls.Add(Ui.Button("Editar / redefinir senha",()=>{if(grid.CurrentRow!=null)EditUser((User)grid.CurrentRow.Tag);}));bottom.Controls.Add(Ui.Button("Histórico de acesso",()=>{using(var f=new Form{Text="Histórico de acesso",Size=new Size(740,500),StartPosition=FormStartPosition.CenterParent,Font=Font}){var g=Ui.Grid("Data","Ação","Detalhe");foreach(var a in v.audit)g.Rows.Add(LocalDate((string)a["at"]),a["action"],a["detail"]);f.Controls.Add(g);Ui.Show(this,f);}}));p.Controls.Add(grid);p.Controls.Add(bottom);p.Controls.Add(bar);ApplyTheme();})));}
+  void BuildOwner(){var p=Content();var v=ownerViewReady;ownerViewReady=null;if(v==null)throw new InvalidOperationException("Dados do painel indisponíveis.");var bar=Ui.Flow();bar.Controls.Add(Ui.Label("ID remoto: "+remote.InstallationId,9));bar.Controls.Add(Ui.Button("Copiar ID",()=>Clipboard.SetText(remote.InstallationId)));if(remote.Enabled){bar.Controls.Add(Ui.Button("Painel remoto",()=>Process.Start(remote.PanelUrl)));bar.Controls.Add(Ui.Button("Testar Cloudflare",()=>DiagnoseRemote()));}else bar.Controls.Add(Ui.Label("Controle remoto não configurado",9));bar.Controls.Add(Ui.Label(v.control.blocked==1?"Bloqueio local ativo • "+v.control.reason:"Bloqueio local desativado",13));bar.Controls.Add(Ui.Button(v.control.blocked==1?"Desbloquear localmente":"Bloquear localmente",()=>{using(var f=new Fields(v.control.blocked==1?"Desbloquear localmente":"Bloquear localmente")){f.ClientSize=new Size(500,220);var why=f.TextField("Motivo",v.control.reason);f.Add("Sua conta",Ui.Label("Continua com acesso."));if(Ui.Show(this,f)!=DialogResult.OK)return;string reason=why.Text;Fire(()=>{db.Block(v.control.blocked!=1,reason);return null;},r=>LoadPage());}}));bar.Controls.Add(Ui.Button("Criar conta",()=>EditUser(null)));var grid=Ui.Grid("Nome","E-mail","Perfil","Ativa","Proprietário");foreach(var u in v.users){int n=grid.Rows.Add(u.name,u.email,RoleName(u.role),u.active==1?"Sim":"Não",u.Owner?"Protegido":"—");grid.Rows[n].Tag=u;}var bottom=Ui.Flow();bottom.Dock=DockStyle.Bottom;bottom.Controls.Add(Ui.Button("Editar / redefinir senha",()=>{if(grid.CurrentRow!=null)EditUser((User)grid.CurrentRow.Tag);}));bottom.Controls.Add(Ui.Button("Histórico de acesso",()=>{using(var f=new Form{Text="Histórico de acesso",Size=new Size(740,500),StartPosition=FormStartPosition.CenterParent,Font=Font}){var g=Ui.Grid("Data","Ação","Detalhe");foreach(var a in v.audit)g.Rows.Add(LocalDate((string)a["at"]),a["action"],a["detail"]);f.Controls.Add(g);Ui.Show(this,f);}}));p.Controls.Add(grid);p.Controls.Add(bottom);p.Controls.Add(bar);}
   class OwnerView{public List<User> users;public ControlState control;public List<Dictionary<string,object>> audit;}
   void EditUser(User u){if(u!=null&&u.Owner)throw new Exception("Sua conta é protegida. Para alterar a senha, abra Meu perfil.");using(var f=new Fields(u==null?"Criar conta":"Editar conta")){var name=f.TextField("Nome",u==null?"":u.name);var email=f.TextField("E-mail",u==null?"":u.email);email.MaxLength=254;email.Enabled=u==null;var role=f.Choice("Perfil",new[]{"Administrador","Operador","Financeiro"},u==null?1:u.role=="admin"?0:u.role=="operator"?1:2);var active=f.Check("Conta ativa",u==null||u.active==1);var pw=f.TextField(u==null?"Senha":"Nova senha (opcional)","",true);if(Ui.Show(this,f)!=DialogResult.OK)return;string id=u==null?null:u.id,e=email.Text,n=name.Text,r=new[]{"admin","operator","financial"}[role.SelectedIndex],password=pw.Text;bool a=active.Checked;Fire(()=>{db.SaveUser(id,e,n,r,a,password);return null;},x=>LoadPage());}}
  }
