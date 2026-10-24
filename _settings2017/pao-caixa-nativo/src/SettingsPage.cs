@@ -6,12 +6,12 @@ namespace PaoCaixa {
   void BuildClassicSettings(){
    var p=Content(false);p.AutoScroll=true;
    var data=new CardPanel{Padding=new Padding(0)};data.Controls.Add(new SectionHeading("Dados da padaria","Usados no sistema e no comprovante."));
-   var name=new TextBox{Text=shop.name,MaxLength=80};var operatorName=new TextBox{Text=shop.@operator,MaxLength=60};var footer=new TextBox{Text=shop.footer,MaxLength=200};
-   var nameBox=new FieldBox(name);var operatorBox=new FieldBox(operatorName);var footerBox=new FieldBox(footer);
-   var nameLabel=Ui.Caption("Nome da padaria");var operatorLabel=Ui.Caption("Operador padrão");var footerLabel=Ui.Caption("Mensagem no comprovante");
-   var save=Ui.Primary("Salvar configurações",()=>{var settings=new Settings{name=name.Text,@operator=operatorName.Text,footer=footer.Text};Fire(()=>{db.SaveSettings(settings);return null;},x=>Reload());},"check");save.AutoSize=false;
-   data.Controls.AddRange(new Control[]{nameLabel,nameBox,operatorLabel,operatorBox,footerLabel,footerBox,save});
-   Action dataLayout=()=>{int w=data.ClientSize.Width-44;nameLabel.SetBounds(22,99,w,23);nameBox.SetBounds(22,127,w,43);operatorLabel.SetBounds(22,185,w,23);operatorBox.SetBounds(22,213,w,43);footerLabel.SetBounds(22,271,w,23);footerBox.SetBounds(22,299,w,43);save.SetBounds(22,365,w,45);};data.SizeChanged+=(sender,e)=>dataLayout();
+   var name=new TextBox{Text=shop.name,MaxLength=80};var footer=new TextBox{Text=shop.footer,MaxLength=200};
+   var nameBox=new FieldBox(name);var footerBox=new FieldBox(footer);
+   var nameLabel=Ui.Caption("Nome da padaria");var footerLabel=Ui.Caption("Mensagem no comprovante");
+   var save=Ui.Primary("Salvar configurações",()=>{var settings=new Settings{name=name.Text,@operator=shop.@operator,footer=footer.Text};Fire(()=>{db.SaveSettings(settings);return null;},x=>Reload());},"check");save.AutoSize=false;
+   data.Controls.AddRange(new Control[]{nameLabel,nameBox,footerLabel,footerBox,save});
+   Action dataLayout=()=>{int w=Math.Max(1,data.ClientSize.Width-44);nameLabel.SetBounds(22,99,w,23);nameBox.SetBounds(22,127,w,43);footerLabel.SetBounds(22,185,w,23);footerBox.SetBounds(22,213,w,43);save.SetBounds(22,289,w,45);};data.SizeChanged+=(sender,e)=>dataLayout();
    var backups=new CardPanel{Padding=new Padding(0)};backups.Controls.Add(new SectionHeading("Backup dos dados","Uma cópia para proteger seus registros."));
    var backupNotice=Ui.Caption("Salvando no banco offline.\nOs registros ficam neste computador, separados da instalação.");backupNotice.AutoSize=false;
    var complete=Ui.Primary("Baixar backup completo",()=>Backup(),"download");complete.AutoSize=false;
@@ -34,9 +34,9 @@ namespace PaoCaixa {
     int w=ResponsiveLayout.ContentWidth(p.ClientSize.Width),x=ResponsiveLayout.ContentLeft(p.ClientSize.Width);
     bool two=w>=790;
     int cw=two?(w-24)/2:w;
-    data.SetBounds(x,0,cw,466);
-    backups.SetBounds(x+(two?cw+24:0),two?0:490,cw,466);
-    int y=two?490:980;
+    data.SetBounds(x,0,cw,380);
+    backups.SetBounds(x+(two?cw+24:0),two?0:404,cw,466);
+    int y=two?490:894;
     update.SetBounds(x,y,w,w<800?485:420);
     dataLayout();backupLayout();updateLayout();
     p.AutoScrollMinSize=new Size(0,y+update.Height+14);
