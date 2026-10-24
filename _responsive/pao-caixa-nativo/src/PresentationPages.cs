@@ -35,7 +35,7 @@ namespace PaoCaixa {
     y+=two?panelHeight:panelHeight*2+22;
     if(!today){daily.SetBounds(x,y+23,w,260);y+=283;}
     p.AutoScrollMinSize=new Size(0,y+14);
-   }p.SizeChanged+=(sender,e)=>arrange();
+   };p.SizeChanged+=(sender,e)=>arrange();
    Action<ReportView,DateTime,DateTime> showReport=(view,a,b)=>{
     var r=view.result;cards.Cards[0].Value=D.Money(r.revenue);cards.Cards[0].Detail=r.count+" vendas concluídas"+(today?" hoje":" no período");cards.Cards[1].Value=D.Money(r.revenue-r.cost);cards.Cards[1].Detail="Após desconto e custo dos produtos";cards.Cards[2].Value=D.Money(r.count==0?0:(long)Math.Round(r.revenue/(decimal)r.count));cards.Cards[2].Detail="Média por venda concluída";cards.Cards[3].Value=today?products.Count(x=>x.active&&x.stock<=x.minStock).ToString():D.Money((long)Math.Round(r.revenue/(decimal)Math.Max(1,(b-a).TotalDays)));cards.Cards[3].Detail=today?"Produtos no mínimo ou abaixo":"Inclui todos os dias do período";
     foreach(var card in cards.Cards)card.Invalidate();ranking.Bind(r.ranking);payments.Result=r;payments.Invalidate();daily.Bind(r.daily);recentGrid.Rows.Clear();foreach(var sale in view.recent){int row=recentGrid.Rows.Add("#"+sale.number.ToString("0000"),LocalDate(sale.at),string.Join(" + ",sale.payments.Select(x=>D.MethodNames[Array.IndexOf(D.Methods,x.method)])),D.Money(sale.total),sale.status=="paid"?"Concluída":"Cancelada");recentGrid.Rows[row].Tag=sale;}if(view.recent.Count==0&&today)recentGrid.Rows.Add("","Nenhuma venda por aqui.","","","");arrange();
