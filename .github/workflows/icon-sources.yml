@@ -1,0 +1,32 @@
+name: Preparar ícones 2.0.15
+on:
+  push:
+    branches: [ui/sidebar-icons-2015]
+    paths: ['.github/workflows/icon-sources.yml']
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Separar código de ícones e menu da versão atual
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile
+          with zipfile.ZipFile('PaoCaixa-2.0.14-Source.zip') as z:
+           for name in z.namelist():
+            if not name.endswith('.cs'):continue
+            b=z.read(name)
+            if b'class Icons' not in b and not name.endswith('VisualControls.cs'):continue
+            dest=pathlib.Path('_icon_source')/name
+            dest.parent.mkdir(parents=True,exist_ok=True)
+            dest.write_bytes(b)
+            print('SOURCE',name,len(b))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _icon_source
+          git commit -m 'chore: extrair controles e ícones atuais para modernização'
+          git push
