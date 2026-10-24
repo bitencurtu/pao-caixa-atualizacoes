@@ -10,9 +10,37 @@ namespace PaoCaixa {
   protected override void OnPaint(PaintEventArgs e){var g=e.Graphics;g.Clear(Ui.Bg);g.SmoothingMode=SmoothingMode.AntiAlias;Ui.Box(g,new Rectangle(0,0,Width-1,Height+16),Ui.Card,Ui.Line,12);Ui.Text(g,Title,new Rectangle(21,Height<75?6:14,Width-43,30),12,Ui.Ink,FontStyle.Bold);Ui.Text(g,Description,new Rectangle(21,Height<75?34:46,Width-43,22),8.5f,Ui.Muted);using(var p=new Pen(Ui.Line))g.DrawLine(p,0,Height-1,Width,Height-1);}
   public void ThemeChanged(){Invalidate();}
  }
+ public static class ResponsiveLayout {
+  // Medidas lógicas: limitar larguras sem distorcer cartões em monitores grandes.
+  public static int SidebarWidth(int formWidth){return formWidth<980?194:formWidth<1180?212:232;}
+  public static int BodyPadding(int availableWidth){return availableWidth<680?14:availableWidth<900?20:28;}
+  public static int ContentWidth(int availableWidth){return Math.Max(1,Math.Min(1160,availableWidth-18));}
+  public static int ContentLeft(int availableWidth){return Math.Max(0,(availableWidth-ContentWidth(availableWidth))/2);}
+  public static Size InitialClientSize(Rectangle workArea){
+   return new Size(Math.Max(1,Math.Min(1280,workArea.Width-46)),Math.Max(1,Math.Min(780,workArea.Height-78)));
+  }
+  public static Size MinimumWindowSize(Rectangle workArea){
+   return new Size(Math.Max(1,Math.Min(820,workArea.Width-16)),Math.Max(1,Math.Min(590,workArea.Height-16)));
+  }
+ }
  public class StatsRow:Panel {
-  public readonly List<StatCard> Cards=new List<StatCard>();public StatsRow(params StatCard[] cards){Cards.AddRange(cards);Controls.AddRange(cards);Height=147;}
-  protected override void OnLayout(LayoutEventArgs e){base.OnLayout(e);if(Cards==null||Cards.Count==0)return;int cols=Width>=710?4:2;cols=Math.Min(cols,Cards.Count);int gap=16,w=(Width-(cols-1)*gap)/cols;Height=((Cards.Count+cols-1)/cols)*147+(((Cards.Count+cols-1)/cols)-1)*gap;for(int i=0;i<Cards.Count;i++)Cards[i].SetBounds((i%cols)*(w+gap),(i/cols)*163,w,147);}
+  public readonly List<StatCard> Cards=new List<StatCard>();
+  public StatsRow(params StatCard[] cards){Cards.AddRange(cards);Controls.AddRange(cards);Height=147;}
+  public static int ColumnsFor(int width,int cardCount){
+   return Math.Min(cardCount,width>=710?4:width>=440?2:1);
+  }
+  public static int HeightFor(int width,int cardCount){
+   if(width<1||cardCount<1)return 0;
+   int cols=ColumnsFor(width,cardCount),rows=(cardCount+cols-1)/cols;
+   return rows*147+(rows-1)*16;
+  }
+  protected override void OnLayout(LayoutEventArgs e){
+   base.OnLayout(e);if(Cards==null||Cards.Count==0||Width<1)return;
+   int cols=ColumnsFor(Width,Cards.Count),gap=16,w=Math.Max(1,(Width-(cols-1)*gap)/cols);
+   int required=HeightFor(Width,Cards.Count);
+   if(Height!=required)Height=required;
+   for(int i=0;i<Cards.Count;i++)Cards[i].SetBounds((i%cols)*(w+gap),(i/cols)*163,w,147);
+  }
  }
  public class CategoryTabs:Control,IThemed {
   public readonly List<string> Items=new List<string>();public string Selected="Todos";public event Action Changed;int offset;readonly List<KeyValuePair<Rectangle,string>> hits=new List<KeyValuePair<Rectangle,string>>();
