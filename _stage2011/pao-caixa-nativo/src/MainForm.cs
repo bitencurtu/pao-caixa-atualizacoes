@@ -19,7 +19,7 @@ namespace PaoCaixa {
   readonly ThemeSwitch theme;
   readonly SmoothWheelRouter wheelRouter;
 
-  bool busy,initializing=true,closingForUpdate,updateFlowRunning,preparingPage;int pageLoadSerial;OwnerView ownerViewReady;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
+  bool busy,initializing=true,closingForUpdate,updateFlowRunning,preparingPage;int pageLoadSerial;OwnerView ownerViewReady;ReportView reportViewReady;CashView cashViewReady;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
   List<Product> products=new List<Product>();Draft draft=new Draft();ProductCatalog catalogue;DataGridView cartGrid;CartList cartView;CategoryTabs categories;TextBox search,discount,note;Label total,subtotal,catalogCaption;SectionHeading cartHeading;Button receive;bool filling;Register currentRegister;bool cashOccupied;long nextNumber;
   readonly Timer draftTimer=new Timer{Interval=450};readonly Timer updateTimer=new Timer{Interval=30000};
   // Consulta automatica em segundo plano a cada 15 segundos. Nunca bloqueia a UI
@@ -236,13 +236,44 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    if(user==null)return;
    int serial=++pageLoadSerial;
    string wanted=nav.SelectedPage;
-   if(wanted=="Painel Biel"){
-    status.Text="Carregando seu painel…";
-    OwnerView loaded;
-    try{loaded=await Task.Run(()=>{lock(db.Sync)return new OwnerView{users=db.Users(),control=db.Control(),audit=db.AuditList()};});}
-    catch(Exception ex){if(!IsDisposed)MessageBox.Show(this,ex.Message,"Não foi possível carregar seu painel");return;}
+   // Concluir as consultas antes da troca; respostas antigas sao descartadas pelo serial.
+   if(wanted=="Painel Biel"||wanted=="Meu caixa"||wanted=="Visão geral"||wanted=="Relatórios"){
+    status.Text="Carregando "+SideNavigation.Title(wanted)+"…";
+    object loaded=null;
+    try{
+     DateTime today=DateTime.Today;
+     int movesPage=cashOffset,registerPage=registerOffset;
+     loaded=await Task.Run(()=>{
+      lock(db.Sync){
+       if(wanted=="Painel Biel")return (object)new OwnerView{users=db.Users(),control=db.Control(),audit=db.AuditList()};
+       if(wanted=="Meu caixa"){
+        var register=db.Open();
+        return (object)new CashView{
+         open=register,occupied=db.Occupied(),totals=register==null?null:db.SessionTotals(register.id),
+         moves=register==null?new List<CashMove>():db.CashMoves(register.id,movesPage),
+         history=db.Registers(registerPage)
+        };
+       }
+       DateTime from=wanted=="Visão geral"?today:new DateTime(today.Year,today.Month,1);
+       DateTime to=today.AddDays(1);
+       return (object)new ReportView{
+        result=ReportResult.Build(db.Report(from,to)),
+        recent=wanted=="Visão geral"?db.Sales(from,to,0,6):new List<Sale>()
+       };
+      }
+     });
+    }catch(Exception ex){
+     if(!IsDisposed&&serial==pageLoadSerial&&user!=null){
+      status.Text=user.name+" • "+RoleName(user.role)+" • Dados locais • Versão "+Updates.Version;
+      MessageBox.Show(this,ex.Message,"Não foi possível carregar "+SideNavigation.Title(wanted));
+     }
+     return;
+    }
     if(IsDisposed||user==null||serial!=pageLoadSerial||nav.SelectedPage!=wanted)return;
-    ownerViewReady=loaded;
+    ownerViewReady=loaded as OwnerView;
+    cashViewReady=loaded as CashView;
+    reportViewReady=loaded as ReportView;
+    status.Text=user.name+" • "+RoleName(user.role)+" • Dados locais • Versão "+Updates.Version;
    }
    var previous=body;
    var next=new Panel{Dock=DockStyle.Fill,Padding=new Padding(28),Size=previous.Size};
@@ -270,11 +301,12 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     // Controles descartados nao podem continuar vivos via campos do MainForm.
     if(wanted!="Pedidos")ReleaseOrderViewReferences();
     if(wanted!="Configurações")updateLabel=null;
+    ownerViewReady=null;cashViewReady=null;reportViewReady=null;
    }catch(Exception ex){
     preparingPage=false;
     if(!next.IsDisposed)next.Dispose();
     if(!previous.IsDisposed&&previous.Parent==shell)body=previous;
-    page=previousPage;ownerViewReady=null;
+    page=previousPage;ownerViewReady=null;cashViewReady=null;reportViewReady=null;
     if(!IsDisposed){RefreshShell();MessageBox.Show(this,ex.Message,"Não foi possível abrir o painel");}
    }
   }
@@ -300,7 +332,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    footerLayout=()=>{bool compact=right.Height<460;int w=footer.ClientSize.Width-36;footer.Height=compact?226:294;clear.SetBounds(14,compact?0:2,145,26);subLabel.SetBounds(18,compact?26:38,w/2,23);subtotal.SetBounds(18+w/2,compact?24:36,w/2,27);discLabel.SetBounds(18,compact?55:75,w-104,25);discountBox.SetBounds(footer.Width-114,compact?49:68,96,compact?34:38);noteBox.SetBounds(18,compact?90:119,w,compact?35:39);totalLabel.SetBounds(18,compact?129:173,compact?86:103,29);total.SetBounds(compact?108:126,compact?126:166,footer.Width-(compact?126:144),compact?35:43);FitTotal();receive.SetBounds(18,compact?166:218,w,compact?40:45);caption.SetBounds(18,compact?207:268,w,18);};footer.SizeChanged+=(sender,e)=>footerLayout();
    right.Controls.Add(cartView);right.Controls.Add(footer);right.Controls.Add(cartHeading);
    discount.TextChanged+=(sender,e)=>{if(!filling){draft.discount=discount.Text;RefreshTotal();QueueDraft();}};note.TextChanged+=(sender,e)=>{if(!filling){draft.note=note.Text;QueueDraft();}};
-   arrange();footerLayout();FillCatalog();RefreshCart();BeginInvoke(new Action(()=>{arrange();search.Focus();}));
+   arrange();footerLayout();FillCatalog();RefreshCart();BeginInvoke(new Action(()=>{if(page=="Pedidos"&&search!=null&&!search.IsDisposed)search.Focus();}));
   }
   void ChangeQuantity(int index,int direction){var line=draft.cart[index];var product=products.Find(x=>x.id==line.productId);if(product==null)return;long q=line.quantity+direction*(product.unit=="kg"?50:1000);if(q<=0)draft.cart.RemoveAt(index);else{D.Calculate(products,new List<Line>{new Line{productId=product.id,quantity=q}},0);line.quantity=q;}RefreshCart();QueueDraft();}
 
