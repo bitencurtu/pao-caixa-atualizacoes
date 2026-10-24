@@ -1,0 +1,47 @@
+name: Preparar versão 2.0.9 otimizada
+on:
+  push:
+    branches: [perf/memory-baseline-209]
+    paths: ['.github/workflows/perf-package.yml']
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Gerar ZIP a partir da 2.0.8 com melhorias medidas
+        run: |
+          python3 - <<'PY'
+          import zipfile,pathlib
+          old=pathlib.Path('PaoCaixa-2.0.8-Source.zip')
+          new=pathlib.Path('PaoCaixa-2.0.9-Source.zip')
+          edits={}
+          for n in ('MainForm.cs','Ui.cs'):
+           src=pathlib.Path('_perf_workbench/pao-caixa-nativo/src')/n
+           edits['pao-caixa-nativo/src/'+n]=src.read_bytes()
+          touched=set()
+          with zipfile.ZipFile(old) as original,zipfile.ZipFile(new,'w') as target:
+           for info in original.infolist():
+            content=original.read(info.filename)
+            if info.filename in edits:
+             content=edits[info.filename];touched.add(info.filename)
+            if info.filename.endswith(('.cs','.json','.nsi','.config','.md','.xml','.mjs','.txt')):
+             content=content.replace(b'2.0.8',b'2.0.9')
+            target.writestr(info,content)
+          assert touched==set(edits),touched
+          with zipfile.ZipFile(new) as z:
+           assert b'2.0.9' in z.read('pao-caixa-nativo/version.json')
+           assert b'!define VERSION "2.0.9"' in z.read('pao-caixa-nativo/installer.nsi')
+           assert b'public const string Version="2.0.9"' in z.read('pao-caixa-nativo/src/Updates.cs')
+           a=z.read('pao-caixa-nativo/src/MainForm.cs')
+           b=z.read('pao-caixa-nativo/src/Ui.cs')
+           assert b'ReleaseOrderViewReferences' in a and b'PaintFont' in b
+          print('Pacote preparado:',new,new.stat().st_size)
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PaoCaixa-2.0.9-Source.zip
+          git rm -qr _perf_workbench .github/workflows/perf-extract.yml .github/workflows/perf-bench.yml .github/workflows/perf-package.yml tools/MemoryBench.cs
+          git commit -m 'perf: corrigir referencias descartadas e reutilizar fontes sem cache de paineis'
+          git push
