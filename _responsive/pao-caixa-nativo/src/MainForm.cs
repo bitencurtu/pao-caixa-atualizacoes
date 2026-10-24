@@ -139,6 +139,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     if(p.Bounds!=new Rectangle(left,top,width,spaceH))p.SetBounds(left,top,width,spaceH);
    };
    body.SizeChanged+=(sender,e)=>arrange();
+   body.PaddingChanged+=(sender,e)=>arrange();
    arrange();
    return p;
   }
