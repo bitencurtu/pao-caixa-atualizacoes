@@ -1,5 +1,5 @@
 import io, zipfile, pathlib
-src=pathlib.Path("PaoCaixa-2.0.5-Source.zip")
+src=pathlib.Path("PaoCaixa-2.0.6-Source.zip")
 data=src.read_bytes()
 needle='void LoadPage(){if(user==null)return;page=nav.SelectedPage;Root(page);'
 with zipfile.ZipFile(io.BytesIO(data),'r') as z:
@@ -30,15 +30,11 @@ replacement=wrapped+'void LoadPage(){if(user==null)return;BeginPageTransition();
 code=code[:start]+code[start:].replace(old,replacement,1)
 assert code.count('BeginPageTransition();try{')==1
 items[name]=(items[name][0],code.encode('utf-8-sig') if items[name][1].startswith(b'\xef\xbb\xbf') else code.encode('utf-8'))
-out=pathlib.Path("PaoCaixa-2.0.6-Source.zip")
+out=pathlib.Path("PaoCaixa-2.0.7-Source.zip")
 # Rewrite all embedded version metadata that the publish workflow validates.
 with zipfile.ZipFile(out,'w') as target:
     for n,(info,payload) in items.items():
-        if n.endswith('/version.json'):
-            payload=payload.replace(b'2.0.5',b'2.0.6')
-        elif n.endswith('/installer.nsi'):
-            payload=payload.replace(b'!define VERSION "2.0.5"',b'!define VERSION "2.0.6"')
-        elif n.endswith('/src/Updates.cs'):
-            payload=payload.replace(b'public const string Version="2.0.5"',b'public const string Version="2.0.6"')
+        if n.endswith(('.cs','.json','.nsi','.config')):
+            payload=payload.replace(b'2.0.6',b'2.0.7')
         target.writestr(info,payload)
 print('Patch created',out,out.stat().st_size,'bytes')
