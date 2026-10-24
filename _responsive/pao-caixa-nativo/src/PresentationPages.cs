@@ -19,7 +19,23 @@ namespace PaoCaixa {
    var latest=GridSection("Últimas vendas","O movimento mais recente do balcão.",recentGrid);var stock=new StockAlerts();stock.Bind(products);if(user.role=="admin")stock.Adjust=product=>GuardUi(()=>Adjust(product));var daily=new DailyPanel();
    p.Controls.Add(toolbar);p.Controls.Add(cards);if(banner!=null)p.Controls.Add(banner);
    Control first=today?(Control)latest:ranking,second=today?(Control)stock:payments;p.Controls.Add(first);p.Controls.Add(second);if(!today)p.Controls.Add(daily);
-   Action arrange=()=>{int w=Math.Max(380,p.Width-20),y=0;toolbar.SetBounds(0,y,w,toolbar.GetPreferredSize(new Size(w,0)).Height>58?104:58);y+=toolbar.Height;if(banner!=null){banner.SetBounds(0,y,w,152);y+=174;}cards.SetBounds(0,y,w,cards.Height);y+=cards.Height+24;bool two=w>=790;int firstWidth=two?(today?(int)(w*.62):(int)(w*.58)):w,secondWidth=two?w-firstWidth-22:w;int panelHeight=today?395:460;first.SetBounds(0,y,firstWidth,panelHeight);second.SetBounds(two?firstWidth+22:0,two?y:y+panelHeight+22,secondWidth,panelHeight);y+=two?panelHeight:panelHeight*2+22;if(!today){daily.SetBounds(0,y+23,w,260);y+=283;}p.AutoScrollMinSize=new Size(0,y+14);};p.SizeChanged+=(sender,e)=>arrange();
+   Action arrange=()=>{
+    int w=ResponsiveLayout.ContentWidth(p.ClientSize.Width),x=ResponsiveLayout.ContentLeft(p.ClientSize.Width),y=0;
+    int toolbarHeight=Math.Max(58,Math.Min(205,toolbar.GetPreferredSize(new Size(w,0)).Height+8));
+    toolbar.SetBounds(x,y,w,toolbarHeight);y+=toolbarHeight;
+    if(banner!=null){banner.SetBounds(x,y,w,152);y+=174;}
+    int statHeight=StatsRow.HeightFor(w,cards.Cards.Count);
+    cards.SetBounds(x,y,w,statHeight);y+=statHeight+24;
+    bool two=w>=790;
+    int firstWidth=two?(today?(int)(w*.62):(int)(w*.58)):w;
+    int secondWidth=two?w-firstWidth-22:w;
+    int panelHeight=today?395:460;
+    first.SetBounds(x,y,firstWidth,panelHeight);
+    second.SetBounds(x+(two?firstWidth+22:0),two?y:y+panelHeight+22,secondWidth,panelHeight);
+    y+=two?panelHeight:panelHeight*2+22;
+    if(!today){daily.SetBounds(x,y+23,w,260);y+=283;}
+    p.AutoScrollMinSize=new Size(0,y+14);
+   }p.SizeChanged+=(sender,e)=>arrange();
    Action<ReportView,DateTime,DateTime> showReport=(view,a,b)=>{
     var r=view.result;cards.Cards[0].Value=D.Money(r.revenue);cards.Cards[0].Detail=r.count+" vendas concluídas"+(today?" hoje":" no período");cards.Cards[1].Value=D.Money(r.revenue-r.cost);cards.Cards[1].Detail="Após desconto e custo dos produtos";cards.Cards[2].Value=D.Money(r.count==0?0:(long)Math.Round(r.revenue/(decimal)r.count));cards.Cards[2].Detail="Média por venda concluída";cards.Cards[3].Value=today?products.Count(x=>x.active&&x.stock<=x.minStock).ToString():D.Money((long)Math.Round(r.revenue/(decimal)Math.Max(1,(b-a).TotalDays)));cards.Cards[3].Detail=today?"Produtos no mínimo ou abaixo":"Inclui todos os dias do período";
     foreach(var card in cards.Cards)card.Invalidate();ranking.Bind(r.ranking);payments.Result=r;payments.Invalidate();daily.Bind(r.daily);recentGrid.Rows.Clear();foreach(var sale in view.recent){int row=recentGrid.Rows.Add("#"+sale.number.ToString("0000"),LocalDate(sale.at),string.Join(" + ",sale.payments.Select(x=>D.MethodNames[Array.IndexOf(D.Methods,x.method)])),D.Money(sale.total),sale.status=="paid"?"Concluída":"Cancelada");recentGrid.Rows[row].Tag=sale;}if(view.recent.Count==0&&today)recentGrid.Rows.Add("","Nenhuma venda por aqui.","","","");arrange();
@@ -123,7 +139,21 @@ namespace PaoCaixa {
     hp.PageText="Página "+(registerOffset/100+1);
     hp.Previous.Enabled=registerOffset>0;hp.Next.Enabled=view.history.Count>100;
     history.Controls.Add(hp);
-    p.Controls.AddRange(new Control[]{intro,toolbar,cards,movements,history});Action arrange=()=>{int w=Math.Max(380,p.Width-20);intro.SetBounds(0,0,w,38);toolbar.SetBounds(0,39,w,60);cards.SetBounds(0,116,w,cards.Height);int y=116+cards.Height+24;movements.SetBounds(0,y,w,325);history.SetBounds(0,y+348,w,350);p.AutoScrollMinSize=new Size(0,y+714);};p.SizeChanged+=(sender,e)=>arrange();arrange();
+    p.Controls.AddRange(new Control[]{intro,toolbar,cards,movements,history});
+    Action arrange=()=>{
+     int w=ResponsiveLayout.ContentWidth(p.ClientSize.Width),x=ResponsiveLayout.ContentLeft(p.ClientSize.Width);
+     intro.SetBounds(x,0,w,38);
+     int toolbarHeight=Math.Max(60,Math.Min(180,toolbar.GetPreferredSize(new Size(w,0)).Height+8));
+     toolbar.SetBounds(x,39,w,toolbarHeight);
+     int cardsY=39+toolbarHeight+16;
+     int statHeight=StatsRow.HeightFor(w,cards.Cards.Count);
+     cards.SetBounds(x,cardsY,w,statHeight);
+     int y=cardsY+statHeight+24;
+     movements.SetBounds(x,y,w,325);
+     history.SetBounds(x,y+348,w,350);
+     p.AutoScrollMinSize=new Size(0,y+714);
+    };
+    p.SizeChanged+=(sender,e)=>arrange();arrange();
   }
  }
 }
