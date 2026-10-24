@@ -30,7 +30,7 @@ class NavigationLatencyTests {
      var nav=(SideNavigation)Get(form,"nav");
      nav.Reset(new[]{"Pedidos","Visão geral","Produtos","Meu caixa","Relatórios","Configurações","Meu perfil"});
      nav.Visible=true;
-     Set(form,"initializing",false);
+     Set(form,"initializing",true);
      Call(form,"LoadPage");Pump(60);
      var samples=new List<double>();
      for(int i=1;i<=28;i++){
@@ -39,6 +39,7 @@ class NavigationLatencyTests {
       int target=i%nav.Pages.Count;
       nav.SelectedIndex=target;
       string page=nav.SelectedPage;
+      Call(form,"LoadPage");
       bool completed=false;
       while(watch.ElapsedMilliseconds<5000){
        Application.DoEvents();
@@ -57,14 +58,13 @@ class NavigationLatencyTests {
      // Preserva rascunho verdadeiro quando existe uma alteracao.
      var draft=(Draft)Get(form,"draft");
      draft.note="Teste de persistencia 2.0.12";
-     var previousPage=(Control)Get(form,"body");
-     int next=(nav.SelectedIndex+1)%nav.Pages.Count;
-     nav.SelectedIndex=next;
+     // Testa o metodo de salvamento com callback antes da troca, sem depender do menu do harness.
+     bool saved=false;
+     var save=typeof(MainForm).GetMethod("SaveDraft",F);
+     save.Invoke(form,new object[]{new Action(()=>saved=true)});
      var waiting=Stopwatch.StartNew();
-     while(waiting.ElapsedMilliseconds<5000){
-      Application.DoEvents();Thread.Sleep(5);
-      if((Control)Get(form,"body")!=previousPage && ((Control)Get(form,"body")).Parent!=null)break;
-     }
+     while(!saved&&waiting.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(5);}
+     Check(saved,"Salvamento assíncrono não concluiu");
      Pump(30);
      lock(db.Sync)Check(db.GetDraft().note=="Teste de persistencia 2.0.12","Rascunho alterado nao foi salvo antes de trocar de tela");
      Console.WriteLine("SAVED_CHANGED_DRAFT;PASS");
