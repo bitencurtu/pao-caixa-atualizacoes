@@ -407,7 +407,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    if(initial==null)throw new InvalidOperationException("O histórico de vendas ainda não foi carregado.");
    var p=Content();
    var bar=Ui.Flow();
-   var from=new DateField{Value=DateTime.Today},to=new DateField{Value=DateTime.Today};
+   DateField from=new DateField{Value=DateTime.Today},to=new DateField{Value=DateTime.Today};
    var fromLabel=Ui.Caption("De");fromLabel.Margin=new Padding(6,14,6,0);
    var toLabel=Ui.Caption("até");toLabel.Margin=new Padding(6,14,6,0);
    bar.Controls.Add(fromLabel);bar.Controls.Add(from);bar.Controls.Add(toLabel);bar.Controls.Add(to);
