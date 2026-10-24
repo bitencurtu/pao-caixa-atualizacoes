@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Windows.Forms;
@@ -40,11 +41,42 @@ namespace PaoCaixa {
   public static Label Caption(string text){var l=Label(text,9);l.Tag="muted";return l;}
   public static FlowLayoutPanel Flow(){return new FlowLayoutPanel{Dock=DockStyle.Top,AutoSize=true,WrapContents=true,Padding=new Padding(2),BackColor=Color.Transparent};}
   public static DataGridView Grid(params string[] headings){var g=new CleanGrid{Dock=DockStyle.Fill,ReadOnly=true,AllowUserToAddRows=false,AllowUserToDeleteRows=false,AllowUserToResizeRows=false,RowHeadersVisible=false,SelectionMode=DataGridViewSelectionMode.FullRowSelect,MultiSelect=false,AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill,AutoSizeRowsMode=DataGridViewAutoSizeRowsMode.None,RowTemplate={Height=55},BorderStyle=BorderStyle.None,CellBorderStyle=DataGridViewCellBorderStyle.SingleHorizontal,ColumnHeadersBorderStyle=DataGridViewHeaderBorderStyle.None,ColumnHeadersHeight=45,ColumnHeadersHeightSizeMode=DataGridViewColumnHeadersHeightSizeMode.DisableResizing};foreach(string h in headings){int idx=g.Columns.Add("c"+g.Columns.Count,h);g.Columns[idx].SortMode=DataGridViewColumnSortMode.NotSortable;g.Columns[idx].MinimumWidth=65;}return g;}
-  public static void Apply(Control c){var custom=c as IThemed;string tag=c.Tag as string;c.ForeColor=tag=="muted"?Muted:Ink;
-   c.BackColor=c is TextBox||c is ComboBox||c is DataGridView||c is CardPanel?Card:tag=="sidebar"?Side:tag=="card"?Card:Bg;
-   if(c is Label||c is FlowLayoutPanel)c.BackColor=Color.Transparent;
-   var g=c as DataGridView;if(g!=null){g.EnableHeadersVisualStyles=false;g.BackgroundColor=Card;g.GridColor=Line;g.DefaultCellStyle.BackColor=Card;g.DefaultCellStyle.ForeColor=Ink;g.DefaultCellStyle.Padding=new Padding(12,4,8,4);g.DefaultCellStyle.SelectionBackColor=Soft;g.DefaultCellStyle.SelectionForeColor=Ink;g.ColumnHeadersDefaultCellStyle.BackColor=Card;g.ColumnHeadersDefaultCellStyle.ForeColor=Muted;var clean=g as CleanGrid;if(clean!=null)g.ColumnHeadersDefaultCellStyle.Font=clean.HeaderFont;g.ColumnHeadersDefaultCellStyle.Padding=new Padding(12,0,0,0);g.AlternatingRowsDefaultCellStyle.BackColor=Card;}
-   if(custom!=null)custom.ThemeChanged();foreach(Control child in c.Controls)Apply(child);c.Invalidate();}
+  // Evitar invalidar todos os controles quando o tema ja foi aplicado.
+  // ConditionalWeakTable nao prende controles descartados na memoria.
+  sealed class ThemeCache {public bool Initialized,WasDark;}
+  static readonly ConditionalWeakTable<Control,ThemeCache> themedControls=new ConditionalWeakTable<Control,ThemeCache>();
+  public static void Apply(Control c){
+   if(c==null||c.IsDisposed)return;
+   ThemeCache cache=themedControls.GetValue(c,key=>new ThemeCache());
+   bool themeChanged=!cache.Initialized||cache.WasDark!=Dark;
+   string tag=c.Tag as string;
+   Color fore=tag=="muted"?Muted:Ink;
+   Color back=c is TextBox||c is ComboBox||c is DataGridView||c is CardPanel?Card:tag=="sidebar"?Side:tag=="card"?Card:Bg;
+   if(c is Label||c is FlowLayoutPanel)back=Color.Transparent;
+   if(c.ForeColor!=fore)c.ForeColor=fore;
+   if(c.BackColor!=back)c.BackColor=back;
+   // Estilos de tabela sao caros e so precisam ser atualizados na primeira
+   // aplicacao ou na troca real do tema.
+   if(themeChanged){
+    var g=c as DataGridView;
+    if(g!=null){
+     g.EnableHeadersVisualStyles=false;
+     g.BackgroundColor=Card;g.GridColor=Line;
+     g.DefaultCellStyle.BackColor=Card;g.DefaultCellStyle.ForeColor=Ink;
+     g.DefaultCellStyle.Padding=new Padding(12,4,8,4);
+     g.DefaultCellStyle.SelectionBackColor=Soft;g.DefaultCellStyle.SelectionForeColor=Ink;
+     g.ColumnHeadersDefaultCellStyle.BackColor=Card;g.ColumnHeadersDefaultCellStyle.ForeColor=Muted;
+     var clean=g as CleanGrid;if(clean!=null)g.ColumnHeadersDefaultCellStyle.Font=clean.HeaderFont;
+     g.ColumnHeadersDefaultCellStyle.Padding=new Padding(12,0,0,0);
+     g.AlternatingRowsDefaultCellStyle.BackColor=Card;
+    }
+    var custom=c as IThemed;
+    if(custom!=null)custom.ThemeChanged();
+    else if(c.IsHandleCreated)c.Invalidate();
+    cache.WasDark=Dark;cache.Initialized=true;
+   }
+   foreach(Control child in c.Controls)Apply(child);
+  }
   public static DialogResult Show(Form owner,Form f){Apply(f);return f.ShowDialog(owner);}
  }
  public interface IThemed {void ThemeChanged();}
