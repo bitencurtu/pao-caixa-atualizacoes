@@ -113,6 +113,8 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   void FitWindowAfterScreenChange(){
    if(IsDisposed||WindowState!=FormWindowState.Normal)return;
    var area=Screen.FromControl(this).WorkingArea;
+   var min=ResponsiveLayout.MinimumWindowSize(area);
+   if(MinimumSize!=min)MinimumSize=min;
    if(Width>area.Width||Height>area.Height){
     Size=new Size(Math.Min(Width,area.Width),Math.Min(Height,area.Height));
    }
