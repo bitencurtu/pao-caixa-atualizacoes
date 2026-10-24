@@ -3,20 +3,73 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
-using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 using PaoCaixa;
 class BenchWindow : MainForm {
+ public Action StartBenchmark;
  public BenchWindow(string dir):base(dir){}
- protected override void OnShown(EventArgs e){} // Evitar inicializar o fluxo remoto em ambiente de teste.
+ protected override void OnShown(EventArgs e){
+  if(StartBenchmark!=null)BeginInvoke(StartBenchmark);
+ }
 }
 class NavigationLatencyTests {
  static readonly BindingFlags F=BindingFlags.NonPublic|BindingFlags.Instance;
+ static int failed;
  static object Get(MainForm c,string name){return typeof(MainForm).GetField(name,F).GetValue(c);}
  static void Set(MainForm c,string name,object value){typeof(MainForm).GetField(name,F).SetValue(c,value);}
  static void Call(MainForm c,string name){typeof(MainForm).GetMethod(name,F).Invoke(c,null);}
- static void Pump(int millis){var t=Stopwatch.StartNew();while(t.ElapsedMilliseconds<millis){Application.DoEvents();Thread.Sleep(2);}Application.DoEvents();}
  static void Check(bool ok,string reason){if(!ok)throw new InvalidOperationException(reason);}
+ static async void Run(BenchWindow form,Store db,User user,string dir){
+  try{
+   Set(form,"db",db);Set(form,"user",user);
+   Call(form,"ReadPresentation");
+   var nav=(SideNavigation)Get(form,"nav");
+   nav.Reset(new[]{"Pedidos","Visão geral","Produtos","Meu caixa","Relatórios","Configurações","Meu perfil"});
+   nav.Visible=true;
+   Set(form,"initializing",true);
+   Call(form,"LoadPage");
+   await Task.Delay(110);
+   var samples=new List<double>();
+   for(int i=1;i<=28;i++){
+    var previous=(Control)Get(form,"body");
+    var watch=Stopwatch.StartNew();
+    nav.SelectedIndex=i%nav.Pages.Count;
+    string expected=nav.SelectedPage;
+    Call(form,"LoadPage");
+    bool completed=false;
+    while(watch.ElapsedMilliseconds<5000){
+     var current=(Control)Get(form,"body");
+     if((string)Get(form,"page")==expected&&current!=previous&&current.Parent!=null){
+      completed=true;break;
+     }
+     await Task.Delay(8);
+    }
+    Check(completed,"Navigation timed out: "+expected+" actual="+Get(form,"page")+" busy="+Get(form,"busy")+" bodyChanged="+(!Object.ReferenceEquals(Get(form,"body"),previous)));
+    await Task.Delay(20);
+    double duration=watch.Elapsed.TotalMilliseconds;
+    Console.WriteLine("NAV_LATENCY;"+expected+";"+duration.ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
+    samples.Add(duration);
+   }
+   // Confirma que pedidos alterados continuam salvos, inclusive antes de mudar de pagina.
+   var draft=(Draft)Get(form,"draft");
+   draft.note="Teste de persistencia 2.0.12";
+   bool saved=false;
+   typeof(MainForm).GetMethod("SaveDraft",F).Invoke(form,new object[]{new Action(()=>saved=true)});
+   var timer=Stopwatch.StartNew();
+   while(!saved&&timer.ElapsedMilliseconds<5000)await Task.Delay(8);
+   Check(saved,"Salvamento assíncrono não concluiu");
+   lock(db.Sync)Check(db.GetDraft().note=="Teste de persistencia 2.0.12","Rascunho alterado nao foi salvo");
+   Console.WriteLine("SAVED_CHANGED_DRAFT;PASS");
+   samples.Sort();
+   Console.WriteLine("LATENCY_SUMMARY;MEDIAN;"+samples[samples.Count/2].ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
+   Console.WriteLine("LATENCY_SUMMARY;MAX;"+samples[samples.Count-1].ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
+   if(File.Exists(Path.Combine(dir,"diagnostico-navegacao.log")))
+    foreach(var line in File.ReadAllLines(Path.Combine(dir,"diagnostico-navegacao.log")))
+     Console.WriteLine("PROFILE;"+line);
+  }catch(Exception ex){failed=1;Console.Error.WriteLine("NAV_TEST_FAIL "+ex);}
+  finally{form.Close();}
+ }
  [STAThread] static void Main(string[] args){
   try{
    Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
@@ -24,56 +77,11 @@ class NavigationLatencyTests {
    using(var db=new Store(dir)){
     var user=db.Login(Store.OwnerEmail,"Teste-Pdv-2026");
     using(var form=new BenchWindow(dir)){
-     form.Show();Pump(60);
-     Set(form,"db",db);Set(form,"user",user);
-     Call(form,"ReadPresentation");
-     var nav=(SideNavigation)Get(form,"nav");
-     nav.Reset(new[]{"Pedidos","Visão geral","Produtos","Meu caixa","Relatórios","Configurações","Meu perfil"});
-     nav.Visible=true;
-     Set(form,"initializing",true);
-     Call(form,"LoadPage");Pump(60);
-     var samples=new List<double>();
-     for(int i=1;i<=28;i++){
-      Control previous=(Control)Get(form,"body");
-      var watch=Stopwatch.StartNew();
-      int target=i%nav.Pages.Count;
-      nav.SelectedIndex=target;
-      string page=nav.SelectedPage;
-      Call(form,"LoadPage");
-      bool completed=false;
-      while(watch.ElapsedMilliseconds<5000){
-       Application.DoEvents();
-       var current=(Control)Get(form,"body");
-       if((string)Get(form,"page")==page && current!=previous && current.Parent!=null){
-        completed=true;break;
-       }
-       Thread.Sleep(3);
-      }
-      Check(completed,"Navigation timed out: "+page+" actual="+Get(form,"page")+" nav="+nav.SelectedPage+" busy="+Get(form,"busy")+" init="+Get(form,"initializing")+" bodyChanged="+(!Object.ReferenceEquals(Get(form,"body"),previous))+" bodyParent="+(((Control)Get(form,"body")).Parent!=null)+" status="+((Label)Get(form,"status")).Text);
-      Pump(20);
-      double duration=watch.Elapsed.TotalMilliseconds;
-      Console.WriteLine("NAV_LATENCY;"+page+";"+duration.ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
-      samples.Add(duration);
-     }
-     // Preserva rascunho verdadeiro quando existe uma alteracao.
-     var draft=(Draft)Get(form,"draft");
-     draft.note="Teste de persistencia 2.0.12";
-     // Testa o metodo de salvamento com callback antes da troca, sem depender do menu do harness.
-     bool saved=false;
-     var save=typeof(MainForm).GetMethod("SaveDraft",F);
-     save.Invoke(form,new object[]{new Action(()=>saved=true)});
-     var waiting=Stopwatch.StartNew();
-     while(!saved&&waiting.ElapsedMilliseconds<5000){Application.DoEvents();Thread.Sleep(5);}
-     Check(saved,"Salvamento assíncrono não concluiu");
-     Pump(30);
-     lock(db.Sync)Check(db.GetDraft().note=="Teste de persistencia 2.0.12","Rascunho alterado nao foi salvo antes de trocar de tela");
-     Console.WriteLine("SAVED_CHANGED_DRAFT;PASS");
-     samples.Sort();
-     Console.WriteLine("LATENCY_SUMMARY;MEDIAN;"+samples[samples.Count/2].ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
-     Console.WriteLine("LATENCY_SUMMARY;MAX;"+samples[samples.Count-1].ToString("0.0",System.Globalization.CultureInfo.InvariantCulture));
-     if(File.Exists(Path.Combine(dir,"diagnostico-navegacao.log")))foreach(var line in File.ReadAllLines(Path.Combine(dir,"diagnostico-navegacao.log")))Console.WriteLine("PROFILE;"+line);
+     form.StartBenchmark=()=>Run(form,db,user,dir);
+     Application.Run(form);
     }
    }
-  }catch(Exception e){Console.Error.WriteLine("NAV_TEST_FAIL "+e);Environment.Exit(1);}
+  }catch(Exception ex){failed=1;Console.Error.WriteLine("NAV_TEST_FAIL "+ex);}
+  if(failed!=0)Environment.Exit(1);
  }
 }
