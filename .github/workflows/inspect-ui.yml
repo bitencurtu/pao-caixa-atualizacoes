@@ -21,6 +21,9 @@ jobs:
               terms=['Controls.Clear(', 'SuspendLayout(', 'ResumeLayout(', 'SetStyle(', 'DoubleBuffered', 'BringToFront(', 'Controls.Add(', 'Controls.Remove(', 'SwitchPage', 'ShowPage', 'Navigate', 'RenderPage', 'RenderView', 'SelectPage', 'OpenPage', 'SetPage', 'ApplyTheme', 'Invalidate(', 'Refresh(']
               for n in names:
                   lines=z.read(n).decode('utf-8-sig').splitlines()
+                  if n.endswith('MainForm.cs'):
+                      for k in [15,17,18,20,75,76,77,78,79,80,81,82,83,187,188,189,190]:
+                          if k < len(lines): print('FULL-MAIN',k+1,lines[k])
                   hits=[i for i,l in enumerate(lines) if any(t.lower() in l.lower() for t in terms)]
                   print('\n###',n,'total',len(lines),'hits',len(hits))
                   seen=set()
