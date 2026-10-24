@@ -75,13 +75,13 @@ namespace PaoCaixa {
      File.AppendAllText(Path.Combine(dataDir,"diagnostico-navegacao.log"),line,Encoding.UTF8);
     }catch{}
    }
-  async Task Run(Func<object> work,Action<object> then=null){if(busy){MessageBox.Show(this,"Aguarde a operação terminar.","Pão & Caixa");return;}busy=true;body.Enabled=false;nav.Enabled=false;status.Text="Aguarde…";try{var result=await Task.Run(()=>{if(db==null)return work();lock(db.Sync)return work();});if(!IsDisposed&&then!=null)then(result);}
+  async Task Run(Func<object> work,Action<object> then=null,bool silentUi=false){if(busy){MessageBox.Show(this,"Aguarde a operação terminar.","Pão & Caixa");return;}busy=true;if(!silentUi){body.Enabled=false;nav.Enabled=false;status.Text="Aguarde…";}try{var result=await Task.Run(()=>{if(db==null)return work();lock(db.Sync)return work();});if(!IsDisposed&&then!=null)then(result);}
    catch(Exception ex){
 #if UI_QA
 Console.Error.WriteLine(ex.ToString());
 #endif
 MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIcon.Information);if(db==null){closingForUpdate=true;Close();return;}if(user!=null){try{lock(db.Sync)db.Current();}catch{user=null;LoginPage();}}}
-   finally{busy=false;if(!IsDisposed){body.Enabled=true;nav.Enabled=true;status.Text=user==null?(statusText??"Dados salvos neste computador. Entre para continuar."):user.name+" • "+RoleName(user.role)+" • Dados locais • Versão "+Updates.Version;
+   finally{busy=false;if(!IsDisposed){if(!silentUi){body.Enabled=true;nav.Enabled=true;status.Text=user==null?(statusText??"Dados salvos neste computador. Entre para continuar."):user.name+" • "+RoleName(user.role)+" • Dados locais • Versão "+Updates.Version;}
     if(pendingRemoteLock)PostUi(()=>ApplyRemoteState());}}
   }
   async void Fire(Func<object> work,Action<object> then=null){await Run(work,then);}
@@ -196,10 +196,10 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     string json=J.Write(d);
     // Nao grava e nao desativa a interface em toda navegacao sem mudancas.
     if(json==lastSavedDraftJson){if(next!=null)next();return;}
-    Fire(()=>{db.SetDraft(d);return null;},x=>{
+    Run(()=>{db.SetDraft(d);return null;},x=>{
      lastSavedDraftJson=json;
      if(next!=null)next();
-    });
+    },true);
    }
   void FlushDraftThen(Action next){draftTimer.Stop();if(user!=null&&user.role!="financial")SaveDraft(next);else next();}
   // Prepara e configura a nova pagina fora da arvore visual. A anterior nao e desmontada.
