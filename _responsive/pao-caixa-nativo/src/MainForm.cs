@@ -120,7 +120,26 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    int y=Math.Max(area.Top,Math.Min(Top,area.Bottom-Height));
    if(x!=Left||y!=Top)Location=new Point(x,y);
   }
-  Panel Content(bool card=true){Panel p=card?(Panel)new CardPanel():new SmoothPanel();p.Dock=DockStyle.Fill;body.Controls.Add(p);p.BringToFront();return p;}
+  Panel Content(bool card=true){
+   Panel p=card?(Panel)new CardPanel():new SmoothPanel();
+   if(!card){p.Dock=DockStyle.Fill;body.Controls.Add(p);p.BringToFront();return p;}
+   // Tabelas e formularios nao devem se esticar sem limite em telas ultrawide.
+   p.Dock=DockStyle.None;
+   body.Controls.Add(p);p.BringToFront();
+   Action arrange=()=>{
+    if(body.IsDisposed||p.IsDisposed)return;
+    int spaceW=Math.Max(1,body.ClientSize.Width-body.Padding.Horizontal);
+    int heading=body.Controls.OfType<PageHeading>().Where(h=>!h.IsDisposed).Select(h=>h.Height).DefaultIfEmpty(0).First();
+    int spaceH=Math.Max(1,body.ClientSize.Height-body.Padding.Vertical-heading);
+    int width=Math.Min(1160,spaceW);
+    int left=body.Padding.Left+(spaceW-width)/2;
+    int top=body.Padding.Top+heading;
+    if(p.Bounds!=new Rectangle(left,top,width,spaceH))p.SetBounds(left,top,width,spaceH);
+   };
+   body.SizeChanged+=(sender,e)=>arrange();
+   arrange();
+   return p;
+  }
   void ApplyTheme(){Ui.Apply(this);foreach(var field in FindFields(this))field.ThemeChanged();}
   static IEnumerable<FieldBox> FindFields(Control parent){foreach(Control c in parent.Controls){var field=c as FieldBox;if(field!=null)yield return field;foreach(var f in FindFields(c))yield return f;}}
   bool HasOpenDialog(){
