@@ -34,10 +34,19 @@ namespace PaoCaixa {
    remote=new RemoteControl(directory);
 #endif
    prefs=Preferences.Load(directory);Ui.Dark=prefs.theme=="dark";theme=header.Theme;
-   Text="Pão & Caixa — "+Updates.Version;Font=Ui.Font();var workArea=Screen.PrimaryScreen.WorkingArea;ClientSize=new Size(Math.Min(1280,Math.Max(800,workArea.Width-40)),Math.Min(780,Math.Max(550,workArea.Height-70)));MinimumSize=new Size(820,590);StartPosition=FormStartPosition.CenterScreen;AutoScaleMode=AutoScaleMode.Dpi;KeyPreview=true;
+   Text="Pão & Caixa — "+Updates.Version;Font=Ui.Font();var workArea=Screen.FromPoint(Cursor.Position).WorkingArea;
+   AutoScaleMode=AutoScaleMode.Dpi;
+   MinimumSize=ResponsiveLayout.MinimumWindowSize(workArea);
+   ClientSize=ResponsiveLayout.InitialClientSize(workArea);
+   StartPosition=FormStartPosition.Manual;
+   Location=new Point(workArea.Left+(workArea.Width-Width)/2,workArea.Top+(workArea.Height-Height)/2);
+   KeyPreview=true;
    try{using(var stream=System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("icon.ico"))Icon=new Icon(stream);}catch{}
    theme.SelectedIndex=Ui.Dark?1:0;status.Dock=DockStyle.Bottom;status.Padding=new Padding(28,0,8,0);status.AutoSize=false;status.Height=25;status.Font=Ui.Font(8);
    shell.Controls.Add(body);shell.Controls.Add(header);shell.Controls.Add(status);Controls.Add(shell);Controls.Add(nav);
+   ApplyResponsiveChrome();
+   ClientSizeChanged+=(sender,e)=>ApplyResponsiveChrome();
+   ResizeEnd+=(sender,e)=>FitWindowAfterScreenChange();
    nav.Logout=()=>GuardUi(()=>{if(!busy)Logout();});nav.Profile=()=>Go("Meu perfil");
    header.CashAction=()=>GuardUi(()=>{if(busy||user==null)return;if(user.role!="financial"&&currentRegister==null&&!cashOccupied)OpenCash();else Go("Meu caixa");});
    theme.SelectedIndexChanged+=(sender,e)=>{try{prefs.theme=theme.SelectedIndex==1?"dark":"light";Ui.Dark=prefs.theme=="dark";prefs.Save(dataDir);ApplyTheme();}catch(Exception ex){MessageBox.Show(ex.Message,"Tema");}};
@@ -91,6 +100,25 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    foreach(Control c in body.Controls.Cast<Control>().ToArray())c.Dispose();body.Controls.Clear();
    string description=caption=="Pedidos"?"Uma venda de cada vez. Tudo sob controle.":caption=="Visão geral"?"Os números de hoje, sem complicação.":caption=="Produtos"?"Os produtos da sua padaria, com preço e estoque sempre à mão.":caption=="Meu caixa"?"Abra, acompanhe e confira o movimento do seu caixa.":caption=="Vendas"?"Cada venda registrada, do pedido ao pagamento.":caption=="Relatórios"?"Entenda o movimento e os produtos que fazem o dia render.":caption=="Configurações"?"Deixe o sistema do jeito da sua padaria.":caption=="Meu perfil"?"Sua conta e sua senha.":caption=="Painel Biel"?"Contas, permissões e controle da instalação.":"Entre com a conta criada pelo administrador.";
    var h=new PageHeading(SideNavigation.Title(caption),description,caption=="Pedidos"?"TUDO PRONTO PARA ATENDER":null);body.Controls.Add(h);body.ResumeLayout();if(!preparingPage)RefreshShell();
+  }
+  void ApplyResponsiveChrome(){
+   if(IsDisposed||Disposing)return;
+   int side=ResponsiveLayout.SidebarWidth(ClientSize.Width);
+   if(nav.Width!=side)nav.Width=side;
+   int inset=ResponsiveLayout.BodyPadding(Math.Max(1,shell.ClientSize.Width));
+   var padding=new Padding(inset);
+   if(body!=null&&!body.IsDisposed&&body.Padding!=padding)body.Padding=padding;
+   if(status.Padding.Left!=inset)status.Padding=new Padding(inset,0,8,0);
+  }
+  void FitWindowAfterScreenChange(){
+   if(IsDisposed||WindowState!=FormWindowState.Normal)return;
+   var area=Screen.FromControl(this).WorkingArea;
+   if(Width>area.Width||Height>area.Height){
+    Size=new Size(Math.Min(Width,area.Width),Math.Min(Height,area.Height));
+   }
+   int x=Math.Max(area.Left,Math.Min(Left,area.Right-Width));
+   int y=Math.Max(area.Top,Math.Min(Top,area.Bottom-Height));
+   if(x!=Left||y!=Top)Location=new Point(x,y);
   }
   Panel Content(bool card=true){Panel p=card?(Panel)new CardPanel():new SmoothPanel();p.Dock=DockStyle.Fill;body.Controls.Add(p);p.BringToFront();return p;}
   void ApplyTheme(){Ui.Apply(this);foreach(var field in FindFields(this))field.ThemeChanged();}
@@ -305,7 +333,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     status.Text=user.name+" • "+RoleName(user.role)+" • Dados locais • Versão "+Updates.Version;
    }
    var previous=body;
-   var next=new Panel{Dock=DockStyle.Fill,Padding=new Padding(28),Size=previous.Size};
+   var next=new Panel{Dock=DockStyle.Fill,Padding=new Padding(ResponsiveLayout.BodyPadding(Math.Max(1,shell.ClientSize.Width))),Size=previous.Size};
    string previousPage=page;
    body=next;
    preparingPage=true;
@@ -356,8 +384,14 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
   }
   void Reload(){PostUi(()=>{if(user!=null)Fire(()=>{ReadPresentation();return null;},x=>LoadPage());});}
   void BuildOrder(){
-   var p=Content(false);p.AutoScroll=false;var left=new Panel();var right=new CardPanel{Padding=new Padding(0)};p.Controls.Add(left);p.Controls.Add(right);
-   var orderTitle=body.Controls.OfType<PageHeading>().FirstOrDefault();Action footerLayout=null;Action arrange=()=>{if(orderTitle!=null)orderTitle.Height=ClientSize.Height<680?68:96;int w=p.ClientSize.Width,rw=Math.Min(351,Math.Max(270,(int)(w*.39))),h=p.ClientSize.Height;left.SetBounds(0,0,Math.Max(100,w-rw-20),h);right.SetBounds(w-rw,0,rw,h);if(cartHeading!=null&&!cartHeading.IsDisposed)cartHeading.Height=h<360?52:h<460?64:81;if(footerLayout!=null)footerLayout();};p.SizeChanged+=(sender,e)=>arrange();
+   var p=Content(false);p.AutoScroll=true;var left=new Panel();var right=new CardPanel{Padding=new Padding(0)};p.Controls.Add(left);p.Controls.Add(right);
+   var orderTitle=body.Controls.OfType<PageHeading>().FirstOrDefault();Action footerLayout=null;Action arrange=()=>{if(orderTitle!=null)orderTitle.Height=ClientSize.Height<680?68:96;int w=Math.Max(1,p.ClientSize.Width),h=Math.Max(450,p.ClientSize.Height);
+    int gap=w<700?12:20;
+    int rw=Math.Min(351,Math.Max(230,(int)(w*.38)));
+    rw=Math.Min(rw,Math.Max(180,w-185-gap));
+    left.SetBounds(0,0,Math.Max(1,w-rw-gap),h);
+    right.SetBounds(Math.Max(0,w-rw),0,rw,h);
+    p.AutoScrollMinSize=new Size(0,h);if(cartHeading!=null&&!cartHeading.IsDisposed)cartHeading.Height=h<360?52:h<460?64:81;if(footerLayout!=null)footerLayout();};p.SizeChanged+=(sender,e)=>arrange();
    search=new TextBox{MaxLength=200};var searchBox=new FieldBox(search,"Buscar produto ou ler código de barras…","search"){Dock=DockStyle.Top,Height=49};
    categories=new CategoryTabs(new[]{"Todos","Pães","Salgados","Doces","Lanches","Bebidas"}.Concat(products.Where(x=>x.active).Select(x=>x.category)).Distinct());categories.Changed+=()=>FillCatalog();
    catalogCaption=Ui.Caption("");catalogCaption.Dock=DockStyle.Top;catalogCaption.AutoSize=false;catalogCaption.Height=36;
