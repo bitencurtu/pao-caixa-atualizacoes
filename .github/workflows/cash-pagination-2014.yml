@@ -1,0 +1,80 @@
+name: Testar paginação do Meu caixa 2.0.14
+on:
+  push:
+    branches: [fix/cash-history-pagination-2014]
+    paths: ['.github/workflows/cash-pagination-2014.yml']
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar versão 2.0.13 e fixture isolado
+        shell: pwsh
+        run: |
+          Expand-Archive 'PaoCaixa-2.0.13-Source.zip' -DestinationPath base -Force
+          @'
+          import pathlib,hashlib
+          src=pathlib.Path("base/pao-caixa-nativo/src/PresentationPages.cs")
+          content=src.read_bytes()
+          git_blob=hashlib.sha1(b"blob "+str(len(content)).encode()+b"\x00"+content).hexdigest()
+          assert git_blob=="3e83cd062451ef642bdcf40f72e6363b6efa9543",("Fonte inesperada",git_blob)
+          print("Conteúdo original confirmado; somente PresentationPages sera alterado.")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Base divergente da versão auditada'}
+          Copy-Item 'tools/PresentationPages-2014.cs' 'base/pao-caixa-nativo/src/PresentationPages.cs' -Force
+          Set-Location 'base/pao-caixa-nativo'
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          Copy-Item vendor/sqlite/sqlite3.dll build/sqlite3.dll -Force
+          node tests/create-legacy-fixture.mjs build/cash-pagination-fixture
+          if($LASTEXITCODE -ne 0){throw 'Fixture falhou'}
+      - name: Compilar e testar os dois históricos no Windows
+        shell: pwsh
+        run: |
+          Set-Location 'base/pao-caixa-nativo'
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $test=(Resolve-Path '../../tools/CashPaginationTests-2014.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:CashPaginationTests' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/CashPaginationTests.exe' @sources $test
+          if($LASTEXITCODE -ne 0){throw 'Compilação falhou'}
+          & ./build/CashPaginationTests.exe build/cash-pagination-fixture
+          if($LASTEXITCODE -ne 0){throw 'Teste de paginação falhou'}
+      - name: Gerar ZIP com única alteração funcional e atualizar versão
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,zipfile
+          source=pathlib.Path("PaoCaixa-2.0.13-Source.zip")
+          target=pathlib.Path("PaoCaixa-2.0.14-Source.zip")
+          edit=pathlib.Path("tools/PresentationPages-2014.cs").read_bytes()
+          replaced=[]
+          with zipfile.ZipFile(source) as original,zipfile.ZipFile(target,"w") as output:
+           for info in original.infolist():
+            b=original.read(info.filename)
+            if info.filename=="pao-caixa-nativo/src/PresentationPages.cs":
+             b=edit
+             replaced.append(info.filename)
+            if info.filename.endswith((".cs",".json",".nsi",".config",".md",".xml",".mjs",".txt")):
+             b=b.replace(b"2.0.13",b"2.0.14")
+            output.writestr(info,b)
+          assert replaced==["pao-caixa-nativo/src/PresentationPages.cs"]
+          with zipfile.ZipFile(target) as z:
+           page=z.read("pao-caixa-nativo/src/PresentationPages.cs")
+           assert b"changeCashPage" in page and b"changeRegisterPage" in page
+           assert b"LoadPage();" not in page
+           assert b"public const string Version=\"2.0.14\"" in z.read("pao-caixa-nativo/src/Updates.cs")
+           assert b'!define VERSION "2.0.14"' in z.read("pao-caixa-nativo/installer.nsi")
+          print("ZIP de produção:",target,target.stat().st_size)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Empacotamento falhou'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PaoCaixa-2.0.14-Source.zip
+          git rm tools/PresentationPages-2014.cs tools/CashPaginationTests-2014.cs .github/workflows/cash-pagination-2014.yml
+          git commit -m "perf: paginação localizada dos históricos de caixa sem reconstrução"
+          git push
