@@ -19,7 +19,7 @@ namespace PaoCaixa {
   readonly ThemeSwitch theme;
   readonly SmoothWheelRouter wheelRouter;
 
-  bool busy,initializing=true,closingForUpdate,updateFlowRunning,preparingPage;int pageLoadSerial;OwnerView ownerViewReady;ReportView reportViewReady;CashView cashViewReady;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
+  bool busy,initializing=true,closingForUpdate,updateFlowRunning,preparingPage;int pageLoadSerial;OwnerView ownerViewReady;ReportView reportViewReady;CashView cashViewReady;List<Sale> salesViewReady;string page;int registerOffset,cashOffset;readonly Updates updates=new Updates();Label updateLabel;
   List<Product> products=new List<Product>();Draft draft=new Draft();string lastSavedDraftJson;ProductCatalog catalogue;DataGridView cartGrid;CartList cartView;CategoryTabs categories;TextBox search,discount,note;Label total,subtotal,catalogCaption;SectionHeading cartHeading;Button receive;bool filling;Register currentRegister;bool cashOccupied;long nextNumber;
   readonly Timer draftTimer=new Timer{Interval=450};readonly Timer updateTimer=new Timer{Interval=30000};
   // Consulta automatica em segundo plano a cada 15 segundos. Nunca bloqueia a UI
@@ -262,7 +262,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    int serial=++pageLoadSerial;
    string wanted=nav.SelectedPage;
    // Concluir as consultas antes da troca; respostas antigas sao descartadas pelo serial.
-   if(wanted=="Painel Biel"||wanted=="Meu caixa"||wanted=="Visão geral"||wanted=="Relatórios"){
+   if(wanted=="Painel Biel"||wanted=="Meu caixa"||wanted=="Visão geral"||wanted=="Relatórios"||wanted=="Vendas"){
     status.Text="Carregando "+SideNavigation.Title(wanted)+"…";
     object loaded=null;
     long dbStarted=Stopwatch.GetTimestamp();
@@ -280,6 +280,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
          history=db.Registers(registerPage)
         };
        }
+       if(wanted=="Vendas")return (object)db.Sales(today,today.AddDays(1),0);
        DateTime from=wanted=="Visão geral"?today:new DateTime(today.Year,today.Month,1);
        DateTime to=today.AddDays(1);
        return (object)new ReportView{
@@ -300,6 +301,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     ownerViewReady=loaded as OwnerView;
     cashViewReady=loaded as CashView;
     reportViewReady=loaded as ReportView;
+    salesViewReady=loaded as List<Sale>;
     status.Text=user.name+" • "+RoleName(user.role)+" • Dados locais • Versão "+Updates.Version;
    }
    var previous=body;
@@ -343,12 +345,12 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     // Controles descartados nao podem continuar vivos via campos do MainForm.
     if(wanted!="Pedidos")ReleaseOrderViewReferences();
     if(wanted!="Configurações")updateLabel=null;
-    ownerViewReady=null;cashViewReady=null;reportViewReady=null;
+    ownerViewReady=null;cashViewReady=null;reportViewReady=null;salesViewReady=null;
    }catch(Exception ex){
     preparingPage=false;
     if(!next.IsDisposed)next.Dispose();
     if(!previous.IsDisposed&&previous.Parent==shell)body=previous;
-    page=previousPage;ownerViewReady=null;cashViewReady=null;reportViewReady=null;
+    page=previousPage;ownerViewReady=null;cashViewReady=null;reportViewReady=null;salesViewReady=null;
     if(!IsDisposed){RefreshShell();MessageBox.Show(this,ex.Message,"Não foi possível abrir o painel");}
    }
   }
