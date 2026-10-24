@@ -41,7 +41,7 @@ namespace PaoCaixa {
    nav.Logout=()=>GuardUi(()=>{if(!busy)Logout();});nav.Profile=()=>Go("Meu perfil");
    header.CashAction=()=>GuardUi(()=>{if(busy||user==null)return;if(user.role!="financial"&&currentRegister==null&&!cashOccupied)OpenCash();else Go("Meu caixa");});
    theme.SelectedIndexChanged+=(sender,e)=>{try{prefs.theme=theme.SelectedIndex==1?"dark":"light";Ui.Dark=prefs.theme=="dark";prefs.Save(dataDir);ApplyTheme();}catch(Exception ex){MessageBox.Show(ex.Message,"Tema");}};
-   nav.SelectedIndexChanged+=(sender,e)=>{if(!initializing&&user!=null&&!busy)FlushDraftThen(()=>LoadPage());};
+   nav.SelectedIndexChanged+=(sender,e)=>{if(!initializing&&user!=null&&!busy){navBegan=Stopwatch.GetTimestamp();FlushDraftThen(()=>{ProfileNav("RASCUNHO",nav.SelectedPage,navBegan);LoadPage();});}};
    draftTimer.Tick+=(sender,e)=>{draftTimer.Stop();if(!busy&&user!=null&&user.role!="financial")SaveDraft(null);else draftTimer.Start();};
    Shown+=async(sender,e)=>{await Run(()=>{remote.Check();db=new Store(dataDir,remote);try{db.DailyBackup();}catch{statusText="Backup diário não concluído. Confira o espaço livre em Configurações.";}return null;});if(!IsDisposed&&db!=null){started=true;await UpdateBeforeLogin();}};
    FormClosing+=(sender,e)=>{if(closingForUpdate)return;if(startupRunning){e.Cancel=true;startupCloseRequested=true;startupCancellation.Cancel();return;}if(busy){e.Cancel=true;return;}if(user!=null&&user.role!="financial"){try{var finalDraft=Snapshot();string finalJson=J.Write(finalDraft);if(finalJson!=lastSavedDraftJson){lock(db.Sync)db.SetDraft(finalDraft);lastSavedDraftJson=finalJson;}}catch(Exception ex){e.Cancel=true;MessageBox.Show(ex.Message,"Não foi possível guardar o pedido");}}};
@@ -62,6 +62,19 @@ namespace PaoCaixa {
   void RefreshShell(){nav.ShopName=shop==null?"Minha padaria":shop.name;nav.UserName=user==null?"":user.name;nav.Role=user==null?"":RoleName(user.role);header.CashOpen=currentRegister!=null;header.CashText=cashOccupied?"Caixa em uso":currentRegister==null?"Caixa fechado":"Caixa aberto";header.Page=page=="Visão geral"?"Visão geral":page=="Relatórios"?"Relatórios":SideNavigation.Title(page??"");nav.Invalidate();header.Invalidate();}
 
   string statusText;
+   // Diagnostico opcional, sem dados comerciais: PAOCAIXA_PROFILE_UI=1.
+   readonly bool traceNavigation=Environment.GetEnvironmentVariable("PAOCAIXA_PROFILE_UI")=="1";
+   long navBegan;
+   static double ElapsedMs(long started){
+    return started==0?0:(Stopwatch.GetTimestamp()-started)*1000.0/Stopwatch.Frequency;
+   }
+   void ProfileNav(string stage,string target,long started){
+    if(!traceNavigation)return;
+    try{
+     string line=DateTime.Now.ToString("HH:mm:ss.fff")+";"+stage+";"+target+";"+ElapsedMs(started).ToString("0.0",System.Globalization.CultureInfo.InvariantCulture)+"ms"+Environment.NewLine;
+     File.AppendAllText(Path.Combine(dataDir,"diagnostico-navegacao.log"),line,Encoding.UTF8);
+    }catch{}
+   }
   async Task Run(Func<object> work,Action<object> then=null){if(busy){MessageBox.Show(this,"Aguarde a operação terminar.","Pão & Caixa");return;}busy=true;body.Enabled=false;nav.Enabled=false;status.Text="Aguarde…";try{var result=await Task.Run(()=>{if(db==null)return work();lock(db.Sync)return work();});if(!IsDisposed&&then!=null)then(result);}
    catch(Exception ex){
 #if UI_QA
@@ -219,7 +232,9 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    next.SetBounds(shell.ClientSize.Width+64,0,Math.Max(1,previous.Width),Math.Max(1,previous.Height));
    shell.Controls.Add(next);
    try{
+    long createStarted=Stopwatch.GetTimestamp();
     CreatePageHandles(next);
+    ProfileNav("LAYOUT_HWND",page,createStarted);
    }catch{
     shell.Controls.Remove(next);
     throw;
@@ -253,6 +268,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
     try{
      DateTime today=DateTime.Today;
      int movesPage=cashOffset,registerPage=registerOffset;
+     long dbStarted=Stopwatch.GetTimestamp();
      loaded=await Task.Run(()=>{
       lock(db.Sync){
        if(wanted=="Painel Biel")return (object)new OwnerView{users=db.Users(),control=db.Control(),audit=db.AuditList()};
@@ -280,6 +296,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
      return;
     }
     if(IsDisposed||user==null||serial!=pageLoadSerial||nav.SelectedPage!=wanted)return;
+    ProfileNav("CONSULTA_BANCO",wanted,dbStarted);
     ownerViewReady=loaded as OwnerView;
     cashViewReady=loaded as CashView;
     reportViewReady=loaded as ReportView;
@@ -291,6 +308,7 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
    body=next;
    preparingPage=true;
    try{
+    long buildStarted=Stopwatch.GetTimestamp();
     page=wanted;Root(page);
     switch(page){
      case "Pedidos":BuildOrder();break;
@@ -304,8 +322,22 @@ MessageBox.Show(this,ex.Message,"Pão & Caixa",MessageBoxButtons.OK,MessageBoxIc
      case "Meu perfil":BuildProfile();break;
      case "Painel Biel":BuildOwner();break;
     }
+    ProfileNav("CONSTRUCAO",wanted,buildStarted);
+    long paintStarted=Stopwatch.GetTimestamp();
+    long themeStarted=Stopwatch.GetTimestamp();
     Ui.Apply(next);
+    ProfileNav("TEMA",wanted,themeStarted);
+    if(traceNavigation){
+     PaintEventHandler firstPaint=null;
+     firstPaint=(sender,args)=>{
+      next.Paint-=firstPaint;
+      ProfileNav("PRIMEIRA_PINTURA",wanted,paintStarted);
+     };
+     next.Paint+=firstPaint;
+    }
+    long swapStarted=Stopwatch.GetTimestamp();
     SwapPage(previous,next);
+    ProfileNav("TRANSICAO",wanted,swapStarted);
     preparingPage=false;
     RefreshShell();
     // Controles descartados nao podem continuar vivos via campos do MainForm.
