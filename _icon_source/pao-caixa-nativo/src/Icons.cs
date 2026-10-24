@@ -67,4 +67,96 @@ namespace PaoCaixa {
    }g.Restore(state);
   }
  }
+
+ // Conjunto vetorial exclusivo do menu lateral. Nao altera os icones do PDV.
+ // Geometria 24 x 24, contornos uniformes e sem dependencias de fontes externas.
+ public static class SidebarIcons {
+  static PointF Pt(float x,float y){return new PointF(x,y);}
+  static void Rounded(Graphics g,Pen pen,float x,float y,float w,float h,float rad){
+   using(var path=new GraphicsPath()){
+    float d=rad*2;
+    path.AddArc(x,y,d,d,180,90);
+    path.AddArc(x+w-d,y,d,d,270,90);
+    path.AddArc(x+w-d,y+h-d,d,d,0,90);
+    path.AddArc(x,y+h-d,d,d,90,90);
+    path.CloseFigure();
+    g.DrawPath(pen,path);
+   }
+  }
+  public static void Draw(Graphics g,string name,Rectangle r,Color color){
+   if(r.Width<=0||r.Height<=0)return;
+   if(name!="basket"&&name!="dashboard"&&name!="package"&&name!="wallet"&&name!="receipt"&&name!="chart"&&name!="settings"&&name!="user"&&name!="lock"){
+    Icons.Draw(g,name,r,color);return;
+   }
+   var state=g.Save();
+   try{
+    g.SmoothingMode=SmoothingMode.AntiAlias;
+    g.PixelOffsetMode=PixelOffsetMode.HighQuality;
+    g.TranslateTransform(r.X,r.Y);
+    g.ScaleTransform(r.Width/24f,r.Height/24f);
+    using(var p=new Pen(color,1.9f)){
+     p.StartCap=LineCap.Round;p.EndCap=LineCap.Round;p.LineJoin=LineJoin.Round;
+     switch(name){
+      case "basket": // Frente de caixa: carrinho de compras
+       g.DrawLines(p,new[]{Pt(2.3f,4.3f),Pt(5.1f,4.3f),Pt(7.7f,16.2f),Pt(19.2f,16.2f)});
+       g.DrawLines(p,new[]{Pt(6.2f,8),Pt(21.6f,8),Pt(19.5f,13.1f),Pt(7.0f,13.1f)});
+       g.DrawEllipse(p,8.0f,19,1.9f,1.9f);g.DrawEllipse(p,17.1f,19,1.9f,1.9f);
+       break;
+      case "dashboard": // Visao geral: quatro paineis
+       Rounded(g,p,3.2f,3.2f,7.3f,7.3f,1.5f);
+       Rounded(g,p,13.5f,3.2f,7.3f,7.3f,1.5f);
+       Rounded(g,p,3.2f,13.5f,7.3f,7.3f,1.5f);
+       Rounded(g,p,13.5f,13.5f,7.3f,7.3f,1.5f);
+       break;
+      case "package": // Produtos e estoque: caixa isometrica
+       g.DrawPolygon(p,new[]{Pt(12,2.7f),Pt(21,7.5f),Pt(21,16.8f),Pt(12,21.3f),Pt(3,16.8f),Pt(3,7.5f)});
+       g.DrawLines(p,new[]{Pt(3,7.5f),Pt(12,12.4f),Pt(21,7.5f)});
+       g.DrawLine(p,12,12.4f,12,21.3f);
+       g.DrawLine(p,7.5f,5.1f,16.5f,10);
+       break;
+      case "wallet": // Meu caixa: carteira com fecho
+       Rounded(g,p,2.5f,5.4f,19.0f,15.0f,2.8f);
+       g.DrawLine(p,3.6f,6.2f,17.8f,3.1f);
+       Rounded(g,p,14,10.2f,8.1f,6.3f,1.7f);
+       using(var dot=new SolidBrush(color))g.FillEllipse(dot,17.1f,12.75f,1.4f,1.4f);
+       break;
+      case "receipt": // Historico de vendas: comprovante
+       g.DrawLines(p,new[]{Pt(5,3),Pt(19,3),Pt(19,21),Pt(15.5f,19.1f),Pt(12,21),Pt(8.5f,19.1f),Pt(5,21),Pt(5,3)});
+       g.DrawLine(p,8.3f,7.6f,15.7f,7.6f);
+       g.DrawLine(p,8.3f,11.4f,15.7f,11.4f);
+       g.DrawLine(p,8.3f,15.2f,13.4f,15.2f);
+       break;
+      case "chart": // Relatorios: barras com eixo
+       g.DrawLine(p,3,21,21,21);
+       Rounded(g,p,5,12.0f,3.4f,6.7f,0.8f);
+       Rounded(g,p,10.3f,8.2f,3.4f,10.5f,0.8f);
+       Rounded(g,p,15.6f,4.3f,3.4f,14.4f,0.8f);
+       break;
+      case "settings": // Configuracoes: engrenagem geometrica
+       var teeth=new PointF[32];
+       for(int i=0;i<8;i++){
+        double angle=-Math.PI/2+i*Math.PI/4;
+        for(int j=0;j<4;j++){
+         double a=angle+(-0.34+j*0.225);
+         float rad=j==1||j==2?10f:8.1f;
+         teeth[i*4+j]=Pt(12+(float)Math.Cos(a)*rad,12+(float)Math.Sin(a)*rad);
+        }
+       }
+       g.DrawPolygon(p,teeth);
+       g.DrawEllipse(p,8.7f,8.7f,6.6f,6.6f);
+       break;
+      case "user": // Meu perfil
+       g.DrawEllipse(p,8.4f,3.0f,7.2f,7.2f);
+       g.DrawBezier(p,4.5f,20.8f,4.5f,11.1f,19.5f,11.1f,19.5f,20.8f);
+       break;
+      case "lock": // Meu painel: area protegida
+       Rounded(g,p,4.5f,10.5f,15,10.4f,2.0f);
+       g.DrawArc(p,7.6f,3.3f,8.8f,14.0f,180,180);
+       g.DrawLine(p,12,15,12,17.1f);
+       break;
+     }
+    }
+   }finally{g.Restore(state);}
+  }
+ }
 }
