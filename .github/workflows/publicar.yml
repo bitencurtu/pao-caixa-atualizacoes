@@ -109,6 +109,8 @@ jobs:
             "/out:$exe", '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
             '/reference:System.Web.Extensions.dll', '/reference:System.Core.dll',
             "/resource:$(Join-Path $project 'resources/seed.json'),seed.json",
+            "/resource:$(Join-Path $project 'resources/catalog-extras.json'),catalog-extras.json",
+            "/resource:$(Join-Path $project 'resources/catalog-photos.jpg'),catalog-photos.jpg",
             "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json",
             "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico",
             "/win32manifest:$(Join-Path $project 'resources/app.manifest')",
@@ -158,6 +160,13 @@ jobs:
             $script = $script.Replace('"' + $referencia + '"', '"' + $caminhoNSIS + '"')
             Write-Host "NSIS: $referencia -> $caminhoNSIS"
           }
+          # Distribuir os créditos junto com as fotos licenciadas, inclusive offline.
+          $guiaNoInstalador = [System.IO.Path]::GetFullPath((Join-Path $project 'GUIA-PaoCaixa-Windows.md'))
+          $creditos = [System.IO.Path]::GetFullPath((Join-Path $project 'resources/FOTOS-LICENCAS.md'))
+          if (-not (Test-Path -LiteralPath $creditos)) { throw 'Créditos de fotos não encontrados no pacote.' }
+          $linhaGuia = 'File "' + $guiaNoInstalador + '"'
+          if (-not $script.Contains($linhaGuia)) { throw 'Não foi possível localizar o guia no instalador.' }
+          $script = $script.Replace($linhaGuia, $linhaGuia + [Environment]::NewLine + '  File "' + $creditos + '"')
           $installerName = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
           $out = Join-Path $project "release\$installerName"
           $script = $script.Replace('"release/PaoCaixa-Instalador-${VERSION}-x86.exe"','"' + $out + '"')
@@ -195,12 +204,15 @@ jobs:
             '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
             '/reference:System.Web.Extensions.dll','/reference:System.Core.dll',
             "/resource:$(Join-Path $project 'resources\seed.json'),seed.json",
+            "/resource:$(Join-Path $project 'resources\catalog-extras.json'),catalog-extras.json",
+            "/resource:$(Join-Path $project 'resources\catalog-photos.jpg'),catalog-photos.jpg",
             "/resource:$(Join-Path $project 'resources\owner-bootstrap.json'),owner-bootstrap.json")
-          foreach ($test in @('CoreTests','UpdateTests','RemotePolicyTests','IntegrationTests','VisualBehaviorTests')) {
+          foreach ($test in @('CoreTests','UpdateTests','RemotePolicyTests','IntegrationTests','VisualBehaviorTests','CatalogPhotoTests')) {
             $testExe = Join-Path $project "build\$test.exe"
             $testSource = Join-Path $project "tests\$test.cs"
             $legacySource = Join-Path $project 'tests\legacy\Updates-2.0.3.cs'
-            & $csc @common "/out:$testExe" "/main:$test" @sources $testSource $legacySource
+            $entry = if ($test -eq 'CatalogPhotoTests') { 'PaoCaixa.CatalogPhotoTests' } else { $test }
+            & $csc @common "/out:$testExe" "/main:$entry" @sources $testSource $legacySource
             if ($LASTEXITCODE -ne 0) { throw "Compilacao de $test falhou." }
           }
           & ./build/CoreTests.exe build/core-fixture
@@ -211,6 +223,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Politica de bloqueio/offline falhou.' }
           & ./build/VisualBehaviorTests.exe
           if ($LASTEXITCODE -ne 0) { throw 'Calendario, rolagem ou recursos da interface falharam.' }
+          & node tests/create-legacy-fixture.mjs build/catalog-test-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture do catalogo nao foi criada.' }
+          & ./build/CatalogPhotoTests.exe build/catalog-test-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Produtos ou fotografias offline do catalogo falharam.' }
           $meta = Get-Content version.json -Raw | ConvertFrom-Json
           & ./build/IntegrationTests.exe release/latest.yml "release/PaoCaixa-Instalador-$($meta.version)-x86.exe" windows
           if ($LASTEXITCODE -ne 0) { throw 'Canal GitHub ou instalacao Windows falhou.' }
