@@ -204,7 +204,8 @@ jobs:
             $testExe = Join-Path $project "build\$test.exe"
             $testSource = Join-Path $project "tests\$test.cs"
             $legacySource = Join-Path $project 'tests\legacy\Updates-2.0.3.cs'
-            & $csc @common "/out:$testExe" "/main:$test" @sources $testSource $legacySource
+            $entry = if ($test -eq 'CatalogPhotoTests') { 'PaoCaixa.CatalogPhotoTests' } else { $test }
+            & $csc @common "/out:$testExe" "/main:$entry" @sources $testSource $legacySource
             if ($LASTEXITCODE -ne 0) { throw "Compilacao de $test falhou." }
           }
           & ./build/CoreTests.exe build/core-fixture
