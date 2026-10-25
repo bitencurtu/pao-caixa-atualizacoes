@@ -160,6 +160,13 @@ jobs:
             $script = $script.Replace('"' + $referencia + '"', '"' + $caminhoNSIS + '"')
             Write-Host "NSIS: $referencia -> $caminhoNSIS"
           }
+          # Distribuir os créditos junto com as fotos licenciadas, inclusive offline.
+          $guiaNoInstalador = [System.IO.Path]::GetFullPath((Join-Path $project 'GUIA-PaoCaixa-Windows.md'))
+          $creditos = [System.IO.Path]::GetFullPath((Join-Path $project 'resources/FOTOS-LICENCAS.md'))
+          if (-not (Test-Path -LiteralPath $creditos)) { throw 'Créditos de fotos não encontrados no pacote.' }
+          $linhaGuia = 'File "' + $guiaNoInstalador + '"'
+          if (-not $script.Contains($linhaGuia)) { throw 'Não foi possível localizar o guia no instalador.' }
+          $script = $script.Replace($linhaGuia, $linhaGuia + [Environment]::NewLine + '  File "' + $creditos + '"')
           $installerName = "PaoCaixa-Instalador-$env:VERSAO-x86.exe"
           $out = Join-Path $project "release\$installerName"
           $script = $script.Replace('"release/PaoCaixa-Instalador-${VERSION}-x86.exe"','"' + $out + '"')
