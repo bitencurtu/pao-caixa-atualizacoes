@@ -68,7 +68,12 @@ class RealUsageAudit {
   var b=db.Backup("auditoria");
   Check(System.IO.File.Exists(b),"backup completo SQLite criado");
   Console.WriteLine("USAGE_DATA;SALES=213;CANCELED=1;BACKUP=CREATED");
-  return p;
+  // Produto separado, com exatamente uma movimentação de estoque, para testar a paginação.
+  var ledgerProduct=new Product{name="Produto com uma movimentação",code="AUDIT-LEDGER-"+DateTime.UtcNow.Ticks,unit="un",category="Testes",price=100,cost=20,stock=1000,minStock=0,active=true,icon="bread"};
+  db.SaveProduct(ledgerProduct);
+  ledgerProduct=db.Products().First(x=>x.code==ledgerProduct.code);
+  Check(db.StockHistory(ledgerProduct.id).Count==1,"produto com exatamente uma movimentacao para paginação");
+  return ledgerProduct;
  }
  static async void Run(RealUsageAuditWindow form,Store db,User user,Product product){
   try{
