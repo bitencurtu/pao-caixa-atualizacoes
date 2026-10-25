@@ -1,0 +1,88 @@
+name: Testar históricos e preparar 2.0.18
+on:
+  push:
+    branches: [fix/history-pagination-2018]
+    paths: ['.github/workflows/history-fix-2018.yml','tools/MainForm-2018.cs','tools/HistoryPaginationRegression2018.cs']
+permissions:
+  contents: write
+jobs:
+  history:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar versão 2.0.17 e banco de testes separado
+        shell: pwsh
+        run: |
+          Expand-Archive PaoCaixa-2.0.17-Source.zip -DestinationPath working -Force
+          Copy-Item tools/MainForm-2018.cs working/pao-caixa-nativo/src/MainForm.cs -Force
+          Set-Location working/pao-caixa-nativo
+          New-Item -ItemType Directory build -Force | Out-Null
+          Copy-Item vendor/sqlite/sqlite3.dll build/sqlite3.dll -Force
+          node tests/create-legacy-fixture.mjs build/history-fixture
+          if($LASTEXITCODE -ne 0){throw 'Falha ao preparar banco de testes'}
+      - name: Reproduzir 213 vendas e testar paginação corrigida no Windows
+        shell: pwsh
+        run: |
+          Set-Location working/pao-caixa-nativo
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $harness=(Resolve-Path '../../tools/HistoryPaginationRegression2018.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:RealUsageAudit' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/HistoryPaginationRegression.exe' @sources $harness
+          if($LASTEXITCODE -ne 0){throw 'Não compila a correção'}
+          & ./build/HistoryPaginationRegression.exe build/history-fixture
+          if($LASTEXITCODE -ne 0){throw 'Um dos históricos não passou na regressão'}
+      - name: Verificar migração, caixa, permissões e backups
+        shell: pwsh
+        run: |
+          Set-Location working/pao-caixa-nativo
+          node tests/create-legacy-fixture.mjs build/core-fixture
+          if($LASTEXITCODE -ne 0){throw 'Fixture geral indisponível'}
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $core=(Resolve-Path 'tests/CoreTests.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:CoreTests' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/HistoryCoreRegression.exe' @sources $core
+          if($LASTEXITCODE -ne 0){throw 'Falha compilar testes de segurança'}
+          & ./build/HistoryCoreRegression.exe build/core-fixture
+          if($LASTEXITCODE -ne 0){throw 'Regressão geral detectada'}
+      - name: Empacotar versão 2.0.18 só com a correção de históricos
+        shell: pwsh
+        run: |
+          @'
+          import pathlib,zipfile
+          base=pathlib.Path('PaoCaixa-2.0.17-Source.zip')
+          dst=pathlib.Path('PaoCaixa-2.0.18-Source.zip')
+          modified=pathlib.Path('tools/MainForm-2018.cs').read_bytes()
+          found=0
+          with zipfile.ZipFile(base) as src,zipfile.ZipFile(dst,'w') as out:
+           for info in src.infolist():
+            data=src.read(info.filename)
+            if info.filename=='pao-caixa-nativo/src/MainForm.cs':
+             data=modified
+             found+=1
+            if info.filename.endswith(('.cs','.json','.nsi','.config','.md','.xml','.mjs','.txt')):
+             data=data.replace(b'2.0.17',b'2.0.18')
+            out.writestr(info,data)
+          assert found==1,found
+          with zipfile.ZipFile(dst) as z:
+           code=z.read('pao-caixa-nativo/src/MainForm.cs')
+           assert b'Action<int> fetch=null;' in code
+           assert b'Action<int> navigate=null;' in code
+           assert b'if(fetching||grid.IsDisposed||requestedOffset<0)return;' in code
+           assert b'next.Enabled=rows.Count>100' in code
+           assert b'public const string Version="2.0.18"' in z.read('pao-caixa-nativo/src/Updates.cs')
+           assert b'!define VERSION "2.0.18"' in z.read('pao-caixa-nativo/installer.nsi')
+          print('HISTORY_FIX_PACKAGE',dst,dst.stat().st_size)
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'Falha no pacote de produção'}
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add PaoCaixa-2.0.18-Source.zip
+          git rm tools/MainForm-2018.cs tools/HistoryPaginationRegression2018.cs .github/workflows/history-fix-2018.yml
+          git commit -m 'fix: corrigir páginas vazias dos históricos de vendas e estoque'
+          git push
