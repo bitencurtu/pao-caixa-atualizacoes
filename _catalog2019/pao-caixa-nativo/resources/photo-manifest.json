@@ -2,12 +2,16 @@
   {
     "key": "seed-01",
     "name": "Pão francês",
-    "query": "French bread rolls"
+    "query": "French bread roll",
+    "fallbacks": [
+      "Pão francês"
+    ]
   },
   {
     "key": "seed-02",
     "name": "Pão de queijo",
-    "query": "Pão de queijo"
+    "query": "Pão de queijo",
+    "prefer": "Pao de queijo brasil.jpg"
   },
   {
     "key": "seed-03",
@@ -37,17 +41,23 @@
   {
     "key": "seed-08",
     "name": "Bolo de cenoura",
-    "query": "Brazilian carrot cake"
+    "query": "Brazilian carrot cake",
+    "prefer": "Bolo de cenoura com chocolate e granulado.jpg"
   },
   {
     "key": "seed-09",
     "name": "Sonho de creme",
-    "query": "sonho doce creme Brazilian pastry"
+    "query": "sonho doce creme Brazilian pastry",
+    "prefer": "O doce sonho carioca.jpg"
   },
   {
     "key": "seed-10",
     "name": "Suco de laranja",
-    "query": "orange juice glass"
+    "query": "orange juice",
+    "avoid": [
+      "waffle",
+      "breakfast"
+    ]
   },
   {
     "key": "seed-11",
@@ -92,12 +102,19 @@
   {
     "key": "ex-103",
     "name": "Pão de batata",
-    "query": "potato bread"
+    "query": "Potato buns baked",
+    "avoid": [
+      "sandwich",
+      "peanut butter"
+    ]
   },
   {
     "key": "ex-104",
     "name": "Rosca doce",
-    "query": "sweet bread ring"
+    "query": "Rosca de pan dulce",
+    "fallbacks": [
+      "brioche sweet bread ring"
+    ]
   },
   {
     "key": "ex-105",
@@ -112,12 +129,14 @@
   {
     "key": "ex-107",
     "name": "Esfiha de carne",
-    "query": "sfiha meat pastry"
+    "query": "sfiha meat pastry",
+    "prefer": "Brazilian sfiha.jpg"
   },
   {
     "key": "ex-108",
     "name": "Esfiha de frango",
-    "query": "chicken fatayer"
+    "query": "chicken fatayer",
+    "prefer": "Esfihas (5956093538).jpg"
   },
   {
     "key": "ex-109",
@@ -157,7 +176,8 @@
   {
     "key": "ex-116",
     "name": "Pão de queijo recheado",
-    "query": "stuffed pao de queijo"
+    "query": "stuffed pao de queijo",
+    "prefer": "Pão de queijo recheado com linguiça.jpg"
   },
   {
     "key": "ex-117",
@@ -167,7 +187,8 @@
   {
     "key": "ex-118",
     "name": "Beijinho",
-    "query": "beijinho coconut sweet"
+    "query": "beijinho coconut sweet",
+    "prefer": "Beijinho o Doce Mais Querido.jpg"
   },
   {
     "key": "ex-119",
@@ -177,7 +198,11 @@
   {
     "key": "ex-120",
     "name": "Bolo de chocolate fatia",
-    "query": "chocolate cake slice"
+    "query": "chocolate cake slice dark",
+    "avoid": [
+      "white",
+      "vanilla"
+    ]
   },
   {
     "key": "ex-121",
@@ -187,7 +212,11 @@
   {
     "key": "ex-122",
     "name": "Donut",
-    "query": "glazed doughnut"
+    "query": "doughnut pink icing",
+    "avoid": [
+      "cat",
+      "halloween"
+    ]
   },
   {
     "key": "ex-123",
@@ -207,7 +236,11 @@
   {
     "key": "ex-126",
     "name": "Suco de uva",
-    "query": "grape juice glass"
+    "query": "grape juice drink",
+    "avoid": [
+      "apple",
+      "orange"
+    ]
   },
   {
     "key": "ex-127",
