@@ -101,6 +101,27 @@ namespace PaoCaixa {
    int offset=0;while(true){var rows=Sales(start,end,offset,500);foreach(var v in rows)yield return v;if(rows.Count<500)yield break;offset+=500;}
   }
   public void SaveProduct(Product p){Admin();p.name=D.Text(p.name,"o nome",100);p.code=D.Text(p.code,"o código",60);p.category=D.Text(p.category,"a categoria",60);if(p.unit!="un"&&p.unit!="kg")throw new Exception("Unidade inválida.");D.Int(p.price,"Preço",1);D.Int(p.cost,"Custo");D.Int(p.minStock,"Estoque mínimo");Mutation(()=>{var all=All<Product>("products");var old=all.Find(x=>x.id==p.id);if(all.Any(x=>string.Equals(x.code,p.code,StringComparison.OrdinalIgnoreCase)&&x.id!=p.id))throw new Exception("Já existe um produto com esse código.");if(old!=null&&old.unit!=p.unit)throw new Exception("A unidade não pode ser alterada. Crie outro produto.");p.stock=old==null?p.stock:old.stock;D.Int(p.stock,"Estoque");if(p.unit=="un"&&(p.stock%1000!=0||p.minStock%1000!=0))throw new Exception("Estoque por unidade deve ser inteiro.");p.icon=p.icon??"bread";if(old==null){p.id=D.Id();Insert("products",p.id,p);if(p.stock!=0){var m=new StockMove{id=D.Id(),productId=p.id,at=D.Now(),quantity=p.stock,reason="Estoque inicial"};Insert("stock_moves",m.id,m);}}else Update("products",p.id,p);});}
+  // Adiciona somente produtos demonstrativos ausentes; não altera preços,
+  // estoques ou códigos de produtos já cadastrados pelo estabelecimento.
+  public int ImportExampleProducts(){
+   Admin();
+   var samples=J.Read<List<Product>>(Resource("catalog-extras.json"));
+   int added=0;
+   Mutation(()=>{
+    var existing=All<Product>("products");
+    var codes=new HashSet<string>(existing.Select(x=>x.code),StringComparer.OrdinalIgnoreCase);
+    var names=new HashSet<string>(existing.Select(x=>x.name),StringComparer.CurrentCultureIgnoreCase);
+    foreach(var template in samples){
+     if(codes.Contains(template.code)||names.Contains(template.name))continue;
+     var p=new Product{id=D.Id(),name=template.name,code=template.code,category=template.category,
+      unit="un",price=template.price,cost=0,stock=0,minStock=0,active=true,
+      icon=template.icon,photoKey=template.photoKey};
+     Insert("products",p.id,p);
+     codes.Add(p.code);names.Add(p.name);added++;
+    }
+   });
+   return added;
+  }
   public void AdjustStock(string id,long q,string reason){Admin();if(q==0||Math.Abs(q)>1000000000)throw new Exception("Informe uma quantidade válida.");reason=D.Text(reason,"o motivo");Mutation(()=>{var p=ProductRaw(id);if(p.unit=="un"&&q%1000!=0)throw new Exception("Quantidade por unidade deve ser inteira.");p.stock+=q;D.Int(p.stock,"Estoque");Update("products",id,p);var m=new StockMove{id=D.Id(),productId=id,at=D.Now(),quantity=q,reason=reason};Insert("stock_moves",m.id,m);});}
   public List<StockMove> StockHistory(string id,int offset=0){Admin();return sql.Query("SELECT payload FROM stock_moves WHERE json_extract(payload,'$.productId')=? ORDER BY position LIMIT 101 OFFSET ?",id,offset).Select(x=>J.Read<StockMove>((string)x["payload"])).ToList();}
   public void SaveSettings(Settings s){Admin();s.name=D.Text(s.name,"o nome da padaria",100);s.@operator=D.Text(s.@operator,"o operador",60);if(s.footer==null||s.footer.Length>200)throw new Exception("Rodapé inválido.");Mutation(()=>sql.Exec("UPDATE metadata SET settings=? WHERE singleton=1",J.Write(s)));}
