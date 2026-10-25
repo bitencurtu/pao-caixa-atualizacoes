@@ -1,0 +1,30 @@
+name: Extract 2.0.17 for usage audit
+on:
+  push:
+    branches: [audit/real-use-2017]
+    paths: ['.github/workflows/audit-extract-2017.yml']
+permissions:
+  contents: write
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract source and tests from release archive
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import pathlib,zipfile
+          with zipfile.ZipFile('PaoCaixa-2.0.17-Source.zip') as z:
+           for entry in z.namelist():
+            if (entry.startswith('pao-caixa-nativo/src/') and entry.endswith('.cs')) or (entry.startswith('pao-caixa-nativo/tests/') and (entry.endswith('.cs') or entry.endswith('.mjs'))):
+             target=pathlib.Path('_audit2017')/entry
+             target.parent.mkdir(parents=True,exist_ok=True)
+             target.write_bytes(z.read(entry))
+             print('EXTRACT',entry,len(z.read(entry)))
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add _audit2017
+          git commit -m 'test: extract 2.0.17 source for realistic usage audit'
+          git push
