@@ -2,7 +2,7 @@ name: Generate and validate bakery catalog 2.0.19
 on:
   push:
     branches: [feat/catalog-photos-2019]
-    paths: ['.github/workflows/catalog-build-2019.yml']
+    paths: ['.github/workflows/catalog-build-2019.yml', '_catalog2019/pao-caixa-nativo/scripts/make-photos.py', '_catalog2019/pao-caixa-nativo/resources/photo-manifest.json']
 permissions:
   contents: write
 jobs:
