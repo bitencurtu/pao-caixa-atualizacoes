@@ -141,12 +141,14 @@
   {
     "key": "ex-109",
     "name": "Enroladinho de presunto e queijo",
-    "query": "ham cheese roll pastry"
+    "query": "ham cheese roll pastry",
+    "prefer": "Ham and cheese rolls aussie (cropped).jpg"
   },
   {
     "key": "ex-110",
     "name": "Risole de queijo",
-    "query": "risole cheese snack"
+    "query": "risole cheese snack",
+    "prefer": "Risole1.JPG"
   },
   {
     "key": "ex-111",
