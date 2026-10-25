@@ -4,7 +4,7 @@ using System.Globalization;
 using System.Linq;
 using System.Web.Script.Serialization;
 namespace PaoCaixa {
- public class Product { public string id,name,code,category,unit,icon; public long price,cost,stock,minStock; public bool active; }
+ public class Product { public string id,name,code,category,unit,icon,photoKey; public long price,cost,stock,minStock; public bool active; }
  public class Line { public string productId; public long quantity; }
  public class Item:Line { public string name,code,unit; public long price,cost,total; }
  public class Payment { public string method; public long amount; }
