@@ -59,7 +59,7 @@ class RealUsageAudit {
      new List<Payment>{new Payment{method="pix",amount=155}},0,"Auditoria");
   }
   Check(db.NextNumber()==next+213,"numeracao unica em vendas consecutivas");
-  var rows=db.Sales(DateTime.Today.AddDays(-1),DateTime.Today.AddDays(2));
+  var rows=db.Sales(DateTime.Today.AddDays(-1),DateTime.Today.AddDays(2),0,500);
   Console.WriteLine("AUDIT_SORT;count="+rows.Count+";numbers="+string.Join(",",rows.Take(10).Select(v=>v.number.ToString()).ToArray())+";last="+string.Join(",",rows.Skip(Math.Max(0,rows.Count-5)).Select(v=>v.number.ToString()).ToArray()));
   Check(rows.Count>=213&&rows[0].number>rows[1].number,"historico ordenado pela venda recente");
   var last=ReportResult.Build(db.Report(DateTime.Today.AddDays(-1),DateTime.Today.AddDays(2)));
