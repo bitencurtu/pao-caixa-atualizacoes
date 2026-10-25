@@ -216,6 +216,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Politica de bloqueio/offline falhou.' }
           & ./build/VisualBehaviorTests.exe
           if ($LASTEXITCODE -ne 0) { throw 'Calendario, rolagem ou recursos da interface falharam.' }
+          & node tests/create-legacy-fixture.mjs build/catalog-test-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture do catalogo nao foi criada.' }
           & ./build/CatalogPhotoTests.exe build/catalog-test-fixture
           if ($LASTEXITCODE -ne 0) { throw 'Produtos ou fotografias offline do catalogo falharam.' }
           $meta = Get-Content version.json -Raw | ConvertFrom-Json
