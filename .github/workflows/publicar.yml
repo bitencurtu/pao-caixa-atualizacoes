@@ -109,6 +109,8 @@ jobs:
             "/out:$exe", '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
             '/reference:System.Web.Extensions.dll', '/reference:System.Core.dll',
             "/resource:$(Join-Path $project 'resources/seed.json'),seed.json",
+            "/resource:$(Join-Path $project 'resources/catalog-extras.json'),catalog-extras.json",
+            "/resource:$(Join-Path $project 'resources/catalog-photos.jpg'),catalog-photos.jpg",
             "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json",
             "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico",
             "/win32manifest:$(Join-Path $project 'resources/app.manifest')",
@@ -195,8 +197,10 @@ jobs:
             '/reference:System.Windows.Forms.dll','/reference:System.Drawing.dll',
             '/reference:System.Web.Extensions.dll','/reference:System.Core.dll',
             "/resource:$(Join-Path $project 'resources\seed.json'),seed.json",
+            "/resource:$(Join-Path $project 'resources\catalog-extras.json'),catalog-extras.json",
+            "/resource:$(Join-Path $project 'resources\catalog-photos.jpg'),catalog-photos.jpg",
             "/resource:$(Join-Path $project 'resources\owner-bootstrap.json'),owner-bootstrap.json")
-          foreach ($test in @('CoreTests','UpdateTests','RemotePolicyTests','IntegrationTests','VisualBehaviorTests')) {
+          foreach ($test in @('CoreTests','UpdateTests','RemotePolicyTests','IntegrationTests','VisualBehaviorTests','CatalogPhotoTests')) {
             $testExe = Join-Path $project "build\$test.exe"
             $testSource = Join-Path $project "tests\$test.cs"
             $legacySource = Join-Path $project 'tests\legacy\Updates-2.0.3.cs'
@@ -211,6 +215,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Politica de bloqueio/offline falhou.' }
           & ./build/VisualBehaviorTests.exe
           if ($LASTEXITCODE -ne 0) { throw 'Calendario, rolagem ou recursos da interface falharam.' }
+          & ./build/CatalogPhotoTests.exe build/catalog-test-fixture
+          if ($LASTEXITCODE -ne 0) { throw 'Produtos ou fotografias offline do catalogo falharam.' }
           $meta = Get-Content version.json -Raw | ConvertFrom-Json
           & ./build/IntegrationTests.exe release/latest.yml "release/PaoCaixa-Instalador-$($meta.version)-x86.exe" windows
           if ($LASTEXITCODE -ne 0) { throw 'Canal GitHub ou instalacao Windows falhou.' }
