@@ -1,0 +1,48 @@
+name: Auditoria de cenários reais 2.0.17
+on:
+  push:
+    branches: [audit/real-use-2017]
+    paths: ['.github/workflows/real-use-audit-2017.yml', 'tools/RealUsageAudit2017.cs']
+permissions:
+  contents: read
+jobs:
+  real-use:
+    runs-on: windows-2022
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Preparar fixture isolado e sources exatos da release
+        shell: pwsh
+        run: |
+          Expand-Archive PaoCaixa-2.0.17-Source.zip -DestinationPath testrepo -Force
+          Set-Location testrepo/pao-caixa-nativo
+          New-Item -ItemType Directory build -Force | Out-Null
+          Copy-Item vendor/sqlite/sqlite3.dll build/sqlite3.dll -Force
+          node tests/create-legacy-fixture.mjs build/usage-fixture
+          if($LASTEXITCODE -ne 0){throw 'Falhou fixture de uso'}
+      - name: Compilar testes de uso e comportamento visual real
+        shell: pwsh
+        run: |
+          Set-Location testrepo/pao-caixa-nativo
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          $test=(Resolve-Path '../../tools/RealUsageAudit2017.cs').Path
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:RealUsageAudit' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/RealUsageAudit.exe' @sources $test
+          if($LASTEXITCODE -ne 0){throw 'Compilação dos testes falhou'}
+          & ./build/RealUsageAudit.exe build/usage-fixture
+          if($LASTEXITCODE -ne 0){throw 'Cenário real falhou'}
+      - name: Executar regressão de migração e segurança
+        shell: pwsh
+        run: |
+          Set-Location testrepo/pao-caixa-nativo
+          $csc=Join-Path $env:WINDIR 'Microsoft.NET/Framework/v4.0.30319/csc.exe'
+          $project=(Get-Location).Path
+          $sources=@(Get-ChildItem src -Filter '*.cs' | ForEach-Object FullName)
+          & $csc '/nologo' '/langversion:5' '/codepage:65001' '/target:exe' '/platform:x86' '/optimize+' '/main:CoreTests' '/reference:System.Windows.Forms.dll' '/reference:System.Drawing.dll' '/reference:System.Web.Extensions.dll' '/reference:System.Core.dll' "/resource:$(Join-Path $project 'resources/seed.json'),seed.json" "/resource:$(Join-Path $project 'resources/owner-bootstrap.json'),owner-bootstrap.json" "/resource:$(Join-Path $project 'resources/icon.ico'),icon.ico" '/out:build/CoreAudit.exe' @sources tests/CoreTests.cs
+          if($LASTEXITCODE -ne 0){throw 'Core test compilation failed'}
+          & ./build/CoreAudit.exe build/usage-core-test
+          if($LASTEXITCODE -ne 0){throw 'Core regression failed'}
