@@ -34,25 +34,42 @@ def score(title,query):
  return rank
 def lookup(item):
  query=item['query']
- params={'action':'query','format':'json','generator':'search','gsrsearch':query,'gsrnamespace':6,'gsrlimit':12,'prop':'imageinfo','iiprop':'url|extmetadata|mime','iiurlwidth':320}
- url=BASE+'?'+urllib.parse.urlencode(params)
- data=json.loads(get(url))
+ search_queries=[query]+item.get('fallbacks',[])
  results=[]
- for entry in data.get('query',{}).get('pages',{}).values():
-  info=entry.get('imageinfo',[{}])[0]
-  url=info.get('thumburl') or info.get('url')
-  lic=html.unescape(re.sub('<[^>]+>',' ',info.get('extmetadata',{}).get('LicenseShortName',{}).get('value',''))).strip()
-  license_name=lic.lower()
-  if not any(x in license_name for x in ['cc by','cc0','public domain','pd-','cc-by','free art license']):continue
-  if 'nc' in license_name or 'nd' in license_name:continue
-  if info.get('mime') not in ('image/jpeg','image/png'):continue
-  if not url:continue
-  entry_title=entry.get('title','')
-  results.append((score(entry_title,query),entry_title,url,lic,info.get('descriptionurl',''),info.get('extmetadata',{})))
+ for search_query in search_queries:
+  params={'action':'query','format':'json','generator':'search','gsrsearch':search_query,'gsrnamespace':6,'gsrlimit':14,'prop':'imageinfo','iiprop':'url|extmetadata|mime','iiurlwidth':320}
+  if item.get('prefer'):
+   params.pop('generator')
+   params.pop('gsrsearch')
+   params.pop('gsrnamespace')
+   params.pop('gsrlimit')
+   params['titles']='File:'+item['prefer']
+  url=BASE+'?'+urllib.parse.urlencode(params)
+  data=json.loads(get(url))
+  for entry in data.get('query',{}).get('pages',{}).values():
+   info=entry.get('imageinfo',[{}])[0]
+   thumb=info.get('thumburl') or info.get('url')
+   lic=html.unescape(re.sub('<[^>]+>',' ',info.get('extmetadata',{}).get('LicenseShortName',{}).get('value',''))).strip()
+   license_name=lic.lower()
+   if not any(x in license_name for x in ['cc by','cc0','public domain','pd-','cc-by','free art license']):continue
+   if 'nc' in license_name or 'nd' in license_name:continue
+   if info.get('mime') not in ('image/jpeg','image/png'):continue
+   if not thumb:continue
+   title=entry.get('title','')
+   points=500 if item.get('prefer') and title.lower()=='file:'+item['prefer'].lower() else score(title,search_query)
+   if any(norm(word) in norm(title) for word in item.get('avoid',[])):points-=120
+   results.append((points,title,thumb,lic,info.get('descriptionurl',''),info.get('extmetadata',{})))
+  if results and (item.get('prefer') or max(row[0] for row in results)>=9):break
+  # If a preferred title was missing, the next request uses regular search.
+  if item.get('prefer'):
+   item=dict(item)
+   item.pop('prefer')
+   if not search_queries or search_queries[-1]!=query:search_queries.append(query)
  if not results:raise ValueError('No licensed JPEG/PNG candidates for '+item['key']+': '+query)
  results.sort(key=lambda x:x[0],reverse=True)
  failures=[]
- for points,title,url,lic,description,metadata in results[:6]:
+ for points,title,url,lic,description,metadata in results[:8]:
+  if points<0:continue
   try:
    raw=get(url)
    if len(raw)>3500000:continue
@@ -69,12 +86,18 @@ def lookup(item):
 def main():
  assert len(MANIFEST)==46,'Expected exactly 46 photo entries'
  images=[None]*len(MANIFEST);credits=[None]*len(MANIFEST)
+ failures=[]
  with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
   pending={pool.submit(lookup,item):idx for idx,item in enumerate(MANIFEST)}
   for task in concurrent.futures.as_completed(pending):
    idx=pending[task]
-   image,metadata=task.result()
-   images[idx]=image;credits[idx]=metadata
+   try:
+    image,metadata=task.result()
+    images[idx]=image;credits[idx]=metadata
+   except Exception as exc:
+    print('PHOTO_MISSING',MANIFEST[idx]['key'],str(exc),flush=True)
+    failures.append(MANIFEST[idx]['key'])
+ if failures:raise ValueError('Unresolved photos: '+', '.join(failures))
  atlas=Image.new('RGB',(8*W,6*H),(245,242,233))
  for idx,img in enumerate(images):atlas.paste(img,((idx%8)*W,(idx//8)*H))
  target=OUT/'catalog-photos.jpg'
